@@ -12,6 +12,7 @@ FILES
     personalizationmanager.h
     shortcut_manager_impl.h
     socket_manager_impl.h
+    output_manager_impl.h
     utils.h
 )
 
@@ -26,6 +27,7 @@ target_sources(treeland-protocols PRIVATE
     personalizationwindowcontext.cpp
     personalizationwallpapercontext.cpp
     personalizationmanager.cpp
+    output_manager_impl.cpp
 )
 
 target_compile_definitions(treeland-protocols

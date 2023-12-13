@@ -55,12 +55,14 @@ Item {
                 TreeLandHelper.allowNonDrmOutputAutoChangeMode(output)
                 QmlHelper.outputManager.add({waylandOutput: output})
                 outputManagerV1.newOutput(output)
+                console.log("23333333 onOutputAdded", output)
             }
             onOutputRemoved: function(output) {
                 QmlHelper.outputManager.removeIf(function(prop) {
                     return prop.waylandOutput === output
                 })
                 outputManagerV1.removeOutput(output)
+                console.log("23333333 onOutputRemoved", output)
             }
             onInputAdded: function(inputDevice) {
                 seat0.addDevice(inputDevice)
@@ -168,6 +170,10 @@ Item {
                 }
                 outputManagerV1.sendResult(config, ok)
             }
+        }
+
+        TreelandOutputManager {
+
         }
 
         CursorShapeManager { }

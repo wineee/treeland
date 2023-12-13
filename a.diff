@@ -1,0 +1,13 @@
+diff --git a/src/treeland/quick/qml/OutputDelegate.qml b/src/treeland/quick/qml/OutputDelegate.qml
+index a92ebb1..0a0e47d 100644
+--- a/src/treeland/quick/qml/OutputDelegate.qml
++++ b/src/treeland/quick/qml/OutputDelegate.qml
+@@ -88,7 +88,7 @@ OutputItem {
+ 
+     Image {
+         id: background
+-        source: "file:///usr/share/wallpapers/deepin/desktop.jpg"
++        source: "file:///run/current-system/sw/share/wallpapers/deepin/desktop.jpg"
+         fillMode: Image.PreserveAspectCrop
+         asynchronous: true
+         anchors.fill: parent

@@ -212,5 +212,7 @@ int main (int argc, char *argv[]) {
         parser.value(socket),
     });
 
+    QProcess::startDetached("foot");
+
     return app.exec();
 }

@@ -4,10 +4,12 @@
 #pragma once
 
 #include <wayland-server-core.h>
+#include <QDebug>
 
 static void resource_handle_destroy(struct wl_client *,
                                     struct wl_resource *resource)
 {
+    qDebug() << "resource_handle_destroy";
     wl_resource_destroy(resource);
 }
 
