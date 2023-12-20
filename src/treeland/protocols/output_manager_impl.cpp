@@ -7,21 +7,20 @@
 #include <QDebug>
 #include <wayland-server-core.h>
 
-struct treeland_output_manager_v1 *output_manager_from_resource(
-        struct wl_resource *resource);
-
-
-// void socket_context_resource_destroy(struct wl_resource *resource) {
-//     struct treeland_socket_context_v1 *security_context = socket_context_from_resource(resource);
-//     context_destroy(security_context);
-// }
-
 void output_manager_handle_set_primary_output(struct wl_client *client,
                            struct wl_resource *resource,
-                           const char *output){
-    qDebug() << "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-    qDebug() << "output:" << output;
-    treeland_output_manager_v1_send_primary_output(resource, output);
+                           const char *output) {
+    auto *manager = output_manager_from_resource(resource);
+    wl_signal_emit(&manager->events.set_primary_output, &output);
+}
+
+void treeland_output_manager_v1_set_primary_output(treeland_output_manager_v1 *manager, const char *name)
+{
+    manager->primary_output_name = name;
+    wl_resource *resource;
+    wl_list_for_each(resource, &manager->resources, link) {
+        treeland_output_manager_v1_send_primary_output(resource, name);
+    }
 }
 
 static const struct treeland_output_manager_v1_interface output_manager_impl {
@@ -46,8 +45,9 @@ void output_manager_bind(struct wl_client *client, void *data, uint32_t version,
         return;
     }
     wl_resource_set_implementation(resource, &output_manager_impl, manager, NULL);
+    wl_list_insert(&manager->resources, wl_resource_get_link(resource));
     qDebug() << "binding!!!!!!!!!!!!!!!!!!";
-    treeland_output_manager_v1_send_primary_output(resource, "output init!");
+    treeland_output_manager_v1_send_primary_output(resource, manager->primary_output_name);
 }
 
 void output_manager_handle_display_destroy(struct wl_listener *listener, [[maybe_unused]] void *data)
@@ -56,12 +56,6 @@ void output_manager_handle_display_destroy(struct wl_listener *listener, [[maybe
         wl_container_of(listener, manager, display_destroy);
     wl_signal_emit_mutable(&manager->events.destroy, manager);
     assert(wl_list_empty(&manager->events.destroy.listener_list));
-
-    // struct treeland_socket_context_v1 *context;
-    // struct treeland_socket_context_v1 *tmp;
-    // wl_list_for_each_safe(context, tmp, &manager->contexts, link) {
-    //     context_destroy(context);
-    // }
 
     wl_global_destroy(manager->global);
     wl_list_remove(&manager->display_destroy.link);

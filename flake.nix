@@ -37,7 +37,6 @@
               # For submodule build
               libinput
               wayland
-              meson
             ];
 
             inputsFrom = [

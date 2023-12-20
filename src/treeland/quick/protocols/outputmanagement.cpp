@@ -5,38 +5,76 @@
 
 #include "output-management-protocol.h"
 
+#include <QtQml/qqmlinfo.h>
 #include <qwdisplay.h>
-#include <sys/socket.h>
-#include <unistd.h>
 #include <wayland-server-core.h>
-#include <wayland-util.h>
 #include <wserver.h>
+#include <woutput.h>
 
 #include <QDebug>
 
 TreelandOutputManager::TreelandOutputManager(QObject *parent)
     : Waylib::Server::WQuickWaylandServerInterface(parent)
-    , m_impl(new treeland_output_manager_v1)
+    , m_handle(new treeland_output_manager_v1)
 {
 
 }
 
-treeland_output_manager_v1 *TreelandOutputManager::impl()
+void TreelandOutputManager::on_set_primary_output(void *data)
 {
-    return m_impl;
+    const char *name = *(static_cast<const char **>(data));
+    Q_EMIT requestSetPrimaryOutput(name);
+}
+
+const char *TreelandOutputManager::primaryOutput()
+{
+    return m_handle->primary_output_name;
+}
+
+bool TreelandOutputManager::setPrimaryOutput(const char *name)
+{
+    for (auto *output : m_outputs)
+        if (strcmp(output->nativeHandle()->name, name) == 0) {
+            treeland_output_manager_v1_set_primary_output(m_handle, output->nativeHandle()->name);
+            return true;
+        }
+    qmlWarning(this) << "Try to Set Unkonw output PrimaryOutput" << name;
+    return false;
+}
+
+void TreelandOutputManager::newOutput(WAYLIB_SERVER_NAMESPACE::WOutput *output)
+{
+    m_outputs.append(output);
+    if (m_handle->primary_output_name == nullptr)
+        m_handle->primary_output_name = output->nativeHandle()->name;
+}
+
+void TreelandOutputManager::removeOutput(WAYLIB_SERVER_NAMESPACE::WOutput *output)
+{
+    m_outputs.removeOne(output);
+
+    if (m_handle->primary_output_name == output->nativeHandle()->name) {
+        if (m_outputs.isEmpty()) {
+            m_handle->primary_output_name = nullptr;
+        } else {
+            m_handle->primary_output_name = m_outputs.first()->nativeHandle()->name;
+        }
+        Q_EMIT primaryOutputChanged();
+    }
 }
 
 void TreelandOutputManager::create()
 {
-    m_impl->global = wl_global_create(
+    m_handle->global = wl_global_create(
         server()->handle()->handle(), &treeland_output_manager_v1_interface,
-        TREELAND_OUTPUT_MANAGER_V1_VERSION, m_impl, output_manager_bind);
+        TREELAND_OUTPUT_MANAGER_V1_VERSION, m_handle, output_manager_bind);
 
-    //wl_list_init(&m_impl->contexts);
-    wl_signal_init(&m_impl->events.set_primary_output);
-    wl_signal_init(&m_impl->events.destroy);
+    wl_list_init(&m_handle->resources);
+    wl_signal_init(&m_handle->events.set_primary_output);
+    wl_signal_init(&m_handle->events.destroy);
+    m_sc.connect(&m_handle->events.set_primary_output, this, &TreelandOutputManager::on_set_primary_output);
 
-    m_impl->display_destroy.notify = output_manager_handle_display_destroy;
+    m_handle->display_destroy.notify = output_manager_handle_display_destroy;
     wl_display_add_destroy_listener(server()->handle()->handle(),
-                                    &m_impl->display_destroy);
+                                    &m_handle->display_destroy);
 }

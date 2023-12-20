@@ -10,18 +10,19 @@
 
 struct treeland_output_manager_v1 {
   struct wl_global *global;
+  struct wl_list resources;
 
   struct {
     struct wl_signal set_primary_output;
     struct wl_signal destroy;
   } events;
 
-  //
-
-  void *data;
+  const char *primary_output_name { nullptr };
 
   struct wl_listener display_destroy;
 };
+
+void treeland_output_manager_v1_set_primary_output(treeland_output_manager_v1 *manager, const char *name);
 
 struct treeland_output_manager_v1 *output_manager_from_resource(struct wl_resource *resource);
 

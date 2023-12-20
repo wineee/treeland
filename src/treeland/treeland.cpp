@@ -32,6 +32,7 @@
 #include <QTimer>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
+#include "/home/rewine/dev/waylib/src/server/qtquick/private/wquickbackend_p.h"
 
 Q_IMPORT_PLUGIN(TreeLand_ProtocolsPlugin)
 Q_IMPORT_PLUGIN(TreeLand_UtilsPlugin)
@@ -91,6 +92,19 @@ void TreeLand::setup()
     m_engine->addImportPath(":/qt/qml");
     m_engine->load(QUrl(u"qrc:/qt/qml/TreeLand/Main.qml"_qs));
 #endif
+
+    WServer *server = m_engine->rootObjects().first()->findChild<WServer*>();
+    Q_ASSERT(server);
+    Q_ASSERT(server->isRunning());
+
+    auto backend = server->findChild<WQuickBackend*>();
+    Q_ASSERT(backend);
+
+    // multi output
+    qobject_cast<QWMultiBackend*>(backend->backend())->forEachBackend([] (wlr_backend *backend, void *) {
+        if (auto x11 = QWX11Backend::from(backend))
+            x11->createOutput();
+    }, nullptr);
 }
 
 bool TreeLand::testMode() const {

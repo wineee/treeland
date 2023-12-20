@@ -3,28 +3,43 @@
 
 #pragma once
 
-#include <QObject>
-#include <QQmlEngine>
-#include <wquickwaylandserver.h>
-
 #include "output_manager_impl.h"
+
+#include <wquickwaylandserver.h>
+#include <qwsignalconnector.h>
+
+#include <QList>
+#include <QQmlEngine>
+
+WAYLIB_SERVER_BEGIN_NAMESPACE
+class WOutput;
+WAYLIB_SERVER_END_NAMESPACE
 
 class TreelandOutputManager : public Waylib::Server::WQuickWaylandServerInterface {
     Q_OBJECT
-
     QML_ELEMENT
+    Q_PROPERTY(const char *primaryOutput READ primaryOutput WRITE setPrimaryOutput NOTIFY primaryOutputChanged)
 
 public:
     explicit TreelandOutputManager(QObject *parent = nullptr);
 
-    treeland_output_manager_v1 *impl();
+    const char *primaryOutput();
+    bool setPrimaryOutput(const char *name);
+    Q_INVOKABLE void newOutput(WAYLIB_SERVER_NAMESPACE::WOutput *output);
+    Q_INVOKABLE void removeOutput(WAYLIB_SERVER_NAMESPACE::WOutput *output);
 
-//Q_SIGNALS:
-    //void newSocket(const QString &username, int fd);
+public Q_SLOTS:
+    void on_set_primary_output(void *data);
 
 protected:
     void create() override;
 
+Q_SIGNALS:
+    void primaryOutputChanged();
+    void requestSetPrimaryOutput(const char *);
+
 private:
-    treeland_output_manager_v1 *m_impl;
+    treeland_output_manager_v1 *m_handle;
+    QList<WAYLIB_SERVER_NAMESPACE::WOutput*> m_outputs;
+    QW_NAMESPACE::QWSignalConnector m_sc;
 };
