@@ -31,6 +31,8 @@ qt_add_qml_module(greeterplugin
         ${GREETER_SOURCES}
     RESOURCE_PREFIX
         /qt/qml
+    OUTPUT_DIRECTORY
+        ${PROJECT_BINARY_DIR}/TreeLand/Greeter
     QML_FILES Greeter.qml
     QML_FILES UserList.qml
     QML_FILES SessionList.qml

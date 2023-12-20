@@ -9,6 +9,8 @@ qt_add_qml_module(treeland-quick-utils
         treelandhelper.cpp
     RESOURCE_PREFIX
         /qt/qml
+    OUTPUT_DIRECTORY                                                                 
+        ${PROJECT_BINARY_DIR}/TreeLand/Utils
 )
 
 target_sources(treeland-quick-utils PUBLIC

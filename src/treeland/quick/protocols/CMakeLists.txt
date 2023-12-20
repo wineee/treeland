@@ -14,6 +14,8 @@ qt_add_qml_module(treeland-quick-protocols
         outputmanagement.cpp
     RESOURCE_PREFIX
         /qt/qml
+    OUTPUT_DIRECTORY
+        ${PROJECT_BINARY_DIR}/TreeLand/Protocols
 )
 
 target_sources(treeland-quick-protocols PUBLIC

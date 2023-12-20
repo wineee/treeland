@@ -36,6 +36,7 @@
             packages = with pkgs; [
               # For submodule build
               libinput
+              wayland
               meson
             ];
 
