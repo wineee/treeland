@@ -3,14 +3,57 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened]
 
-permissions:
-  pull-requests: write
-  contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-pull/${{ github.event.number }}
-  cancel-in-progress: true
-
 jobs:
-  license-check:
-    uses: linuxdeepin/.github/.github/workflows/license-check.yml@master
+  Check-License:
+    runs-on: ubuntu-lastest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install reuse
+        run: |
+          sudo sed -i 's/azure.archive.ubuntu.com/mirrors.layeronline.com/g' /etc/apt/sources.list
+          sudo apt update
+          sudo apt install reuse
+      - name: License Check
+        id: lcheck
+        run: reuse lint
+        continue-on-error: true
+      - name: Generate Reports
+        if: steps.lcheck.outcome != 'success'
+        run: |
+          printf "## License: REUSE Compliance Check failed\n" >> $GITHUB_STEP_SUMMARY || true
+          echo "<details>" >> $GITHUB_STEP_SUMMARY || true
+          reuse lint >> $GITHUB_STEP_SUMMARY || true
+          echo "</details>" >> $GITHUB_STEP_SUMMARY || true
+          exit 1
+  Check-README:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install zsh
+        run: |
+          sudo sed -i 's/azure.archive.ubuntu.com/mirrors.layeronline.com/g' /etc/apt/sources.list
+          sudo apt update
+          sudo apt install zsh
+      - name: README.md Check
+        id: rcheck
+        continue-on-error: true
+        run: if [ ! -f "README.md" ];then echo "missing README.md";return 1;fi
+        shell: zsh {0}
+      - name: Generate README Check Reports
+        if: steps.rcheck.outcome != 'success'
+        run: echo "missing README.md" >> $GITHUB_STEP_SUMMARY
+      - name: README.zh_CN.md Check
+        id: zhrcheck
+        continue-on-error: true
+        run: if [ ! -f "README.zh_CN.md" -a ! -f "README.zh-CN.md" -a ! -f "README.en.md" ]; then echo "missing README.zh_CN.md";return 1;fi
+        shell: zsh {0}
+      - name: Generate README zh_CN Check Reports
+        if: steps.zhrcheck.outcome != 'success'
+        run: echo "missing README.zh_CN.md" >> $GITHUB_STEP_SUMMARY
+      - name: Check and Reflect Status
+        if: steps.rcheck.outcome != 'success' || steps.zhrcheck.outcome != 'success'
+        run: exit 1
