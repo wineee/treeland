@@ -28,6 +28,7 @@
 
 #include <QColor>
 #include <QVariant>
+#include <qassert.h>
 
 #define OPEN_ANIMATION 1
 #define CLOSE_ANIMATION 2
@@ -519,19 +520,49 @@ void SurfaceWrapper::setFocus(bool focus, Qt::FocusReason reason)
 void SurfaceWrapper::onPrelaunchSplashDestroyRequested()
 {
     if (m_surfaceItem) {
-        setImplicitSize(m_surfaceItem->implicitWidth(), m_surfaceItem->implicitHeight());
-        connect(m_surfaceItem, &WSurfaceItem::implicitWidthChanged, this, [this] {
-            setImplicitWidth(m_surfaceItem->implicitWidth());
-        });
-        connect(m_surfaceItem, &WSurfaceItem::implicitHeightChanged, this, [this] {
-            setImplicitHeight(m_surfaceItem->implicitHeight());
-        });
-        connect(m_surfaceItem,
-                &WSurfaceItem::boundingRectChanged,
-                this,
-                &SurfaceWrapper::updateBoundingRect);
-        if (m_decoration)
-            m_decoration->stackBefore(m_surfaceItem);
+        const QSizeF targetImplicitSize(m_surfaceItem->implicitWidth(),
+                                        m_surfaceItem->implicitHeight());
+        const bool needImplicitSizeTransition = !qFuzzyCompare(implicitWidth() + 1.0,
+                                                               targetImplicitSize.width() + 1.0)
+            || !qFuzzyCompare(implicitHeight() + 1.0, targetImplicitSize.height() + 1.0);
+
+        auto applySurfaceImplicitBinding = [this, targetImplicitSize]() {
+            setImplicitSize(targetImplicitSize.width(), targetImplicitSize.height());
+            connect(m_surfaceItem, &WSurfaceItem::implicitWidthChanged, this, [this] {
+                setImplicitWidth(m_surfaceItem->implicitWidth());
+            });
+            connect(m_surfaceItem, &WSurfaceItem::implicitHeightChanged, this, [this] {
+                setImplicitHeight(m_surfaceItem->implicitHeight());
+            });
+            connect(m_surfaceItem,
+                    &WSurfaceItem::boundingRectChanged,
+                    this,
+                    &SurfaceWrapper::updateBoundingRect);
+            if (m_decoration)
+                m_decoration->stackBefore(m_surfaceItem);
+        };
+
+        if (needImplicitSizeTransition && !m_geometryAnimation && container()) {
+            m_pendingPrelaunchImplicitSize = targetImplicitSize;
+            const QRectF fromGeometry(position(), size());
+            const QRectF toGeometry(position(), targetImplicitSize);
+            m_geometryAnimation =
+                m_engine->createGeometryAnimation(this, fromGeometry, toGeometry, container());
+            bool ok = connect(m_geometryAnimation,
+                              SIGNAL(ready()),
+                              this,
+                              SLOT(onPrelaunchGeometryAnimationReady()));
+            Q_ASSERT(ok);
+            ok = connect(m_geometryAnimation,
+                         SIGNAL(finished()),
+                         this,
+                         SLOT(onPrelaunchGeometryAnimationFinished()));
+            Q_ASSERT(ok);
+            ok = QMetaObject::invokeMethod(m_geometryAnimation, "start");
+            Q_ASSERT(ok);
+        } else {
+            applySurfaceImplicitBinding();
+        }
     }
 
     updateVisible();
@@ -543,6 +574,34 @@ void SurfaceWrapper::onPrelaunchSplashDestroyRequested()
     if (m_shellSurface)
         updateActiveState();
     Q_EMIT prelaunchSplashChanged();
+}
+
+void SurfaceWrapper::onPrelaunchGeometryAnimationReady()
+{
+    if (!m_surfaceItem)
+        return;
+
+    setImplicitSize(m_pendingPrelaunchImplicitSize.width(), m_pendingPrelaunchImplicitSize.height());
+    connect(m_surfaceItem, &WSurfaceItem::implicitWidthChanged, this, [this] {
+        setImplicitWidth(m_surfaceItem->implicitWidth());
+    });
+    connect(m_surfaceItem, &WSurfaceItem::implicitHeightChanged, this, [this] {
+        setImplicitHeight(m_surfaceItem->implicitHeight());
+    });
+    connect(m_surfaceItem,
+            &WSurfaceItem::boundingRectChanged,
+            this,
+            &SurfaceWrapper::updateBoundingRect);
+    if (m_decoration)
+        m_decoration->stackBefore(m_surfaceItem);
+}
+
+void SurfaceWrapper::onPrelaunchGeometryAnimationFinished()
+{
+    Q_ASSERT(m_geometryAnimation);
+    m_geometryAnimation->disconnect(this);
+    m_geometryAnimation->deleteLater();
+    m_geometryAnimation = nullptr;
 }
 
 WSurface *SurfaceWrapper::surface() const

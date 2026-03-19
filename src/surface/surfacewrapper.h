@@ -376,6 +376,8 @@ private:
     Q_SLOT void onAnimationReady();
     Q_SLOT void onAnimationFinished();
     Q_SLOT void onPrelaunchSplashDestroyRequested();
+    Q_SLOT void onPrelaunchGeometryAnimationReady();
+    Q_SLOT void onPrelaunchGeometryAnimationFinished();
     bool startStateChangeAnimation(SurfaceWrapper::State targetState, const QRectF &targetGeometry);
     void onWindowAnimationFinished();
     Q_SLOT void onShowAnimationFinished();
@@ -405,6 +407,7 @@ private:
     QPointer<QQuickItem> m_coverContent;
     QPointer<QQuickItem> m_prelaunchSplash; // Pre-launch splash item
     QList<WOutput *> m_prelaunchOutputs;    // Outputs for pre-launch splash
+    QSizeF m_pendingPrelaunchImplicitSize;
     QRectF m_boundedRect;
     QRectF m_normalGeometry;
     QRectF m_maximizedGeometry;
