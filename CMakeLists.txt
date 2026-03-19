@@ -23,6 +23,9 @@ add_feature_info(submodule_waylib WITH_SUBMODULE_WAYLIB "Use waylib from submodu
 option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 add_feature_info(ASanSupport ADDRESS_SANITIZER "https://github.com/google/sanitizers/wiki/AddressSanitizer")
 
+option(UNDEFINED_SANITIZER "Enable undefined behavior sanitizer" OFF)
+add_feature_info(UBSanSupport UNDEFINED_SANITIZER "https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html")
+
 option(BUILD_TREELAND_EXAMPLES "Build clients demo to test treeland" OFF)
 add_feature_info(DemoClents BUILD_TEST_CLIENTS "clients demo for testing")
 
@@ -44,10 +47,11 @@ if (NOT EXT_SESSION_LOCK_V1 AND DISABLE_DDM)
     message(WARNING "no ext-session-lock support and no DDM, treeland will not have session locking ability.")
 endif()
 
-if (ADDRESS_SANITIZER)
-    add_compile_options(-fsanitize=address -fno-optimize-sibling-calls -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address)
-endif()
+#if (ADDRESS_SANITIZER OR UNDEFINED_SANITIZER)
+add_compile_options(-fno-optimize-sibling-calls -fno-omit-frame-pointer)
+add_compile_options(-fsanitize=address,undefined)
+add_link_options(-fsanitize=address,undefined)
+#endif()
 # NOTE: Qt keywords conflict with wlroots. but dtksystemsettings still uses it.
 # add_definitions("-DQT_NO_KEYWORDS")
 

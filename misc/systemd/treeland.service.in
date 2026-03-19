@@ -16,15 +16,29 @@ Environment=LIBSEAT_BACKEND=seatd
 Environment=DSG_APP_ID=org.deepin.dde.treeland
 Environment=ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer
 # For Debug: if enable asan, you can't get it's log from journalctl, so ensure the log to a file
-Environment=ASAN_OPTIONS=log_path=/tmp/treeland-asan:detect_leaks=0:abort_on_error=1:symbolize=1
+Environment=ASAN_OPTIONS=\
+log_path=/tmp/treeland-asan:\
+detect_leaks=0:\
+abort_on_error=1:\
+symbolize=1:\
+quarantine_size_mb=0:\
+malloc_fill_byte=170:\
+free_fill_byte=85:\
+detect_stack_use_after_return=1:\
+detect_container_overflow=1:\
+check_initialization_order=1:\
+strict_init_order=1:\
+strict_string_checks=1:\
+alloc_dealloc_mismatch=1:\
+detect_invalid_pointer_pairs=1
 Environment=DDM_DISPLAY_MANAGER=1
 ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/treeland.sh --lockscreen
 Restart=on-failure
 RestartSec=1s
 # Disable logs from treeland.sh to avoid duplicate entries in journalctl
 # since exec replaces the process, logs would appear from both treeland.sh and treeland
-StandardOutput=null
-StandardError=null
+# StandardOutput=null
+# StandardError=null
 
 NoNewPrivileges=true
 OOMScoreAdjust=-300
