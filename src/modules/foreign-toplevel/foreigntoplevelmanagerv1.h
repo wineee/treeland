@@ -12,6 +12,15 @@
 
 class SurfaceWrapper;
 
+struct ForeignToplevelHandleDeleter
+{
+    void operator()(treeland_foreign_toplevel_handle_v1 *handle) const
+    {
+        if (handle)
+            handle->deleteLater();
+    }
+};
+
 QW_USE_NAMESPACE
 WAYLIB_SERVER_USE_NAMESPACE
 
@@ -65,7 +74,9 @@ private:
                                   treeland_foreign_toplevel_handle_v1 *handle);
 
     treeland_foreign_toplevel_manager_v1 *m_manager = nullptr;
-    std::map<SurfaceWrapper *, std::unique_ptr<treeland_foreign_toplevel_handle_v1>> m_surfaces;
+    std::map<SurfaceWrapper *,
+             std::unique_ptr<treeland_foreign_toplevel_handle_v1, ForeignToplevelHandleDeleter>>
+        m_surfaces;
     uint32_t m_nextIdentifier = 1;
 };
 

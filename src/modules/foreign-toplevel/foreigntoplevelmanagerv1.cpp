@@ -55,7 +55,11 @@ void ForeignToplevelV1::addSurface(SurfaceWrapper *wrapper)
     }
 
     auto handle = treeland_foreign_toplevel_handle_v1::create(m_manager);
-    m_surfaces.insert({ wrapper, std::unique_ptr<treeland_foreign_toplevel_handle_v1>(handle) });
+    m_surfaces.insert({
+        wrapper,
+        std::unique_ptr<treeland_foreign_toplevel_handle_v1, ForeignToplevelHandleDeleter>(
+            handle)
+    });
     handle->set_identifier(m_nextIdentifier++);
 
     // Splash supports requestClose immediately; it does not need to wait for
@@ -248,11 +252,12 @@ void ForeignToplevelV1::initializeToplevelHandle(SurfaceWrapper *wrapper,
 
 void ForeignToplevelV1::removeSurface(SurfaceWrapper *wrapper)
 {
-    if (!m_surfaces.count(wrapper)) {
+    auto it = m_surfaces.find(wrapper);
+    if (it == m_surfaces.end()) {
         qCCritical(treelandProtocol) << wrapper << " is not registered in foreign toplevel";
         return;
     }
-    m_surfaces.erase(wrapper);
+    m_surfaces.erase(it);
 }
 
 void ForeignToplevelV1::enterDockPreview(WSurface *relative_surface)
