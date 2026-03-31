@@ -1,0 +1,560 @@
+Treeland项目概要设计说明书
+
+
+
+
+
+
+
+配置项编号	UOS20241105T_SYS02	版本号	V1.0
+文档密级	C级商密	编制部门	图形窗管组
+编制人	郭垚	日期	2024年06月19日
+审核人	张继德	日期	2024年06月19日
+批准人	张爽	日期	2024年06月19日
+
+
+修订记录
+序号	版本号	修订内容描述	修订日期	修订人	审核人	批准人
+1	V1.0	根据模板编写初版本	2024/06/19	郭垚	张继德	张爽
+
+
+目录
+1 概述	1
+1.1 目的	1
+1.2 术语说明	1
+1.3 参考资料	1
+2 系统设计	2
+2.1 设计原则	2
+2.2 需求分析	2
+2.3 主要模块设计	2
+2.3.1 结构设计	3
+2.3.2 窗口管理	4
+2.3.3 输入输出设备的管理	5
+2.3.4 窗口动画	6
+2.3.5 多用户共享	8
+2.4 关键流程设计	8
+2.5 关键接口设计	10
+2.6 关键数据结构设计	26
+2.7 主要人机交互设计	26
+3 非功能性设计	27
+3.1 安全性	27
+3.2 性能	27
+3.3 可靠性	27
+3.4 易用性	27
+3.5 可用性	28
+3.6 兼容性	28
+3.7 韧性	28
+3.8 隐私	28
+3.9 可维护性	28
+4 部署与实施	28
+5 专利	28
+
+
+1概述
+1.1目的
+本文档是针对Treeland给出的系统概要设计文档，在本文档中，将给出Treeland的系统设计原则、关键静态结构设计、关键动态流程设计、数据结构设计、人机交互设计、非功能性设计、系统部署与实施设计、版本维护设计等内容。
+Treeland的系统设计与实现基于Treeland的需求分析，总体上将结合形式化设计的方法与文字描述，给出半形式化的概要设计与底层设计，与需求分析内容的相对应，以保证系统设计的严谨性与可实现性。在形式化部分，本文档将主要采取UML语言的包图、类图、序列图等进行系统设计。
+本文档的适用读者为Treeland的产品经理、设计人员、开发人员、测试人员以及后续维护人员。
+1.2术语说明
+wlroots[1]：一个模块化的Wayland合成器库，上游开源项目。
+qwlroots[2]：对wlroots的Qt绑定，提供Qt风格的开发接口。其设计目标是使用Qt简化调用wlrootsAPI的方式。
+Waylib[3]：基于qwlroots的Wayland合成器库，旨在与QtQuick深度集成，利用QtQuick的场景图形模型来简化窗口管理的复杂性。
+Treeland[4]：基于waylib的Wayland合成器，使用QtQuick来处理一些高级特效，并且承载着合成器的主要业务逻辑。
+1.3参考资料
+wayland协议参考与查询
+xdg-desktop-poltal接口参考与查询
+XDND规范说明
+wlrootsDND相关实现代码
+
+
+
+2系统设计
+2.1设计原则
+由于QML对比QtWidget具有更高的渲染性能，所以TreelandUI部分使用QML实现，但又因为QML对象创建和销毁的时序不方便管理，所以QML的对象管理和业务逻辑尽量使用Qt/C++实现。
+为避免多个进程通信方式加重Treeland业务流程的负担，Treeland与客户端的通信统一用Wayland协议实现，不允许使用DBus，特殊问题需要特殊说明。
+2.2需求分析
+通过对Treeland需求文档进行分析，Treeland应具有以下主要功能：
+1.对窗口的管理能力：管理窗口的显示、焦点、位置、大小、层级关系等等。
+2.对输入输出设备的管理能力：键鼠、触摸设备的事件，显示设备的管理。
+3.窗口动画的能力：多任务视图与工作区动画、窗口切换动画、锁屏与解锁动画等等。
+4.自定义协议：为实现DDE环境中的特殊需求，需要一些定制协议来实现相关功能
+	为实现上述功能，Treeland依赖Waylib将wlroots与Qt的输入事件和渲染逻辑进行关联：
+	Input关联：将 wlr_input_device转成QInputDevice向Qt中注册，封装WSeat类，从wlroots中收到鼠标、键盘、触摸屏等事件后，将其转换为 QInputEvent 类型，然后发送给 QQuickWindow，由Qt的事件分发系统进行处理。如果此事件被分发到 WSurfaceItem，则表示需要发送给对应的wayland surface，再由WSeat将QInputEvent转换为wlroots所需要的事件类型，通过 wlr_seat 提供的接口将其转发到相应的 wayland client。
+Output关联：主要的实现在 WOutputRenderWindow 中，通过 QQuickRenderTarget 将对应 wlr_output 的显示缓冲区绑定为 Qt 支持的绘制对象，由 QQuickRenderControl 控制渲染过程，实际上渲染缓冲区没有变化，背后都是一个dmabuf，与对输入事件的处理不同，没有因为转换带来额外的开销。渲染的实现完全由 QtQuick 经过QRhi封装的OpenGL/ES或Vulkan驱动进行，因为是使用Qt提供的渲染方式，因此可以无缝兼容QtQuick Screen Graphics。在渲染结束后，继续使用 wlr_output_commit_state 进行送显，从这一步开始，渲染流程从QtQuick又回到了wlroots。
+2.3主要模块设计
+2.3.1结构设计
+
+图2.1UML模块图
+如图2.1所示，Treeland外部依赖Waylib，Waylib提供了对qwlroots及QtQuick的封装，让Treeland可以轻易的使用Qml/QtQuick来实现相关动画；同时Treeland还依赖了DTK，DTK为Treeland基础的日志管理，配置管理及一部分动画控件的实现；qwlroots仅仅是对wlroots的一个简单的封装，将C风格的方法调用封装为Qt风格的方法调用，让Treeland及Waylib可以更加方便的使用Qt方法。
+客户端通过Wayland协议与Treeland定制协议进行通信，Wayland协议由wlroots维护，Treeland定制协议由Treeland维护，但不管由谁维护，都需遵循规范，并且添加版本控制。
+Treeland内部通过QmlEngine创建Qml组件，Qml组件一般都是动画组件，如窗口选择器，多任务视图等等，然后通过Helper类来创建和管理Output、Workspace、Wallpaper、Config，其中窗口由Workspace进行管理，但由ShellHandler进行创建，而其他地方的窗口缩略图（窗口选择器、多任务视图、任务栏预览等等）统一由窗口的代理类SurfaceProxy进行管理。
+Treeland的定制协议的业务逻辑整合到Modules中进行管理，由Helper创建，但各自的业务逻辑都应分开实现，最终通过Treeland定制协议与客户端通信。
+
+
+图2.2Treeland多层结构图
+如图2.2所示，Treeland底层依赖wlroots对Wayland协议封装和基础功能的实现，依赖GBM和Mesa进行渲染支持，依赖libseat处理设备与会话的管理，依赖udev管理设备和设备的动态检测，依赖libinput管理输入事件，而wayland是wlroots的依赖，用于定义客户端与合成器之间的通信协议。
+qwlroots、Waylib、DTK、Qt作为Treeland开发库，是Treeland重要依赖项。
+2.3.2窗口管理
+2.3.2.1 显示
+Treeland 使用 Qt Quick 作为渲染及显示的基础框架，并使用 wlroots 作为 DRM 管理器负责上屏显示。
+Qt Quick 是一种使用 GPU 进行渲染的图形库，使用 QRHI 为硬件提供接口抽象，Treeland 在使用 Qt Quick 绘制界面时，可选择性使用 OpenGL、Vulkan后端，而不需要关心不同的接口实现。
+Qt Quick 还拥有一种叫做 QML 的声明式界面描述语言，可以使用类似于 JSON 格式的方式描述界面。Treeland 的部分界面及动画组件使用 QML 创建。
+Qt Quick 想要渲染画面，就需要有一个 WOutputRenderWindow 和 QQmlEngine，WOutputRenderWindow 负责渲染画面，QQmlEngine 负责加载 QML 对象。
+Treeland 作为一个窗口管理器及窗口合成器，需要从 wlroots 获取窗口信息。当 wlroots 上报新建窗口时，Treeland 会创建 SurfaceWrapper 对象来关联一个窗口，并把 SurfaceWrapper 添加到 WOutputRenderWindow 的渲染树上。
+2.3.2.2 焦点
+Treeland 使用 Qt Quick 内置的焦点管理，Qt Quick 内每个元素都是 QQuickItem，同样的，每个窗口都在 Treeland 内封装成 QQuickItem。当一个 QQuickItem 获得焦点后，如果它是一个窗口，那么 Treeland 会通过 wlroots 的 seat 接口设置窗口为激活窗口，之后 Treeland 会将键盘输入事件发送给该窗口。
+2.3.2.3 几何信息
+Treeland在xdg-shell协议里接受窗口的创建请求，该请求会包含一个buffer对象，Treeland和客户端可以使用Wayland协议中管理buffer对象的接口进行窗口的大小调整。
+但Wayland协议不允许客户端管理自身在合成器中的全局所在位置，所以Treeland默认会将窗口放置在当前工作区的主屏的屏幕中间。
+2.3.2.4 层级
+在QtQuick中，自身拥有Z轴管理。在Treeland内部，为窗口划分了不同的层级，从最底层的Wallpaper到最顶层的Overlay，用于容纳不同功能的界面。
+2.3.3输入输出设备的管理
+2.3.3.5 输入设备
+使用wlroots提供的对输入输出设备的统一抽象的api进行管理,wlroots支持libinput,x11,wayland等多种不同的backend,每种backend都会在发现新设备时发出new_input信号，合成器根据输入设备的类型进行初始化，将设备注册到Qt的设备管理体系中，并监听处理该设备发出的输入事件。
+具体来说，输入设备被分键盘，指针设备，触摸设备，平板等。对于键盘设备，设置一个xkbcommon上下文，用来获取键盘事件的原始扫描码，并将其转换为带有XKB键映射的Unicode和键符号（keysyms），键盘设备会发出key和modifiers信号，在WSeat中转为QKeyEvent事件，经过Qt的事件机制进行分发，Treeland可以在事件过滤器中处理快捷键，非窗管快捷键的事件会发送给拥有键盘焦点的客户端。
+对于指针设备（比如鼠标），触摸设备，平板等，一般情况Treeland不直接处理其发送的事件，通过wlr_cursor_attach_input_device附加到wlr_cursor中统一处理，仅需要监听处理wlr_cursor发出的事件，在WSeat中转换为Qt可以识别的事件。对于鼠标事件将motion转为MouseMove事件，button转为MouseButtonPress/Release事件，Axis转换为QWheelEvent事件，对于触摸事件，会监听并储存up,down,motion这些原子事件，在收到frame信号后通过QWindowSystemInterface::handleTouchEvent来转换到Qt事件，或者在收到cancel后发送触摸取消的事件。
+在移除输入设备后，对应的wlr_input_device会发出destroy信号，Treeland需要监听此事件，清理之前注册的QInputDevice，附加到wlr_cursor的指针等设备要取消附加。
+2.3.3.6 输出设备
+对窗管来说，输出设备主要是对显示器，比如屏幕，投影仪的管理。在 wlroots 中，屏幕管理主要是通过 wlr_output 和 wlr_output_layout 相关的功能模块来实现的。每个连接的显示器都用一个 wlr_output 结构表示。该结构包含输出的状态、几何信息（如分辨率和位置）以及与之相关的其他属性，并且拥有修改屏幕基础配置的能力。在多屏情况下，有着 wlr_output_layout 管理多个 wlr_output 实例，控制各个屏幕的位置和尺寸。
+在 Treeland 上，用户对屏幕进行查询和管理，主要由多个 wayland 协议配合完成。客户端应用可以通过 wl_output 获取屏幕命名，位置，分辨率刷新率等基础信息。通过 wlr output management 协议提供的接口，可以对屏幕分辨率，刷新率，缩放等基础参数进行设置。通过wlr gamma control 可以调整屏幕颜色表现和亮度，通过 treeland virtual output manager 实现复制模式，通过 treeland output manager 进行主屏控制。
+2.3.4窗口动画
+2.3.4.7 窗口基础动画
+基础窗口动画功能包括窗口最大化、最小化、移动和调整大小等操作时的平滑过渡效果。这些动画通过在状态变化时逐步调整窗口的位置和大小，确保用户界面的流畅性和视觉一致性，提升用户体验。具体实现通常涉及状态管理、几何计算和动画触发等步骤。
+基础窗口动画通过 QMLParallelAnimation 并行动画组件，同时改变窗口的位置(x, y)和大小(width, height)，并使用 QMLOpacityAnimator 逐渐改变前景效果的透明度，实现窗口在最大化、最小化、移动和调整大小等操作时的平滑过渡效果。实现逻辑如下：
+1.初始化
+窗口的初始位置和大小由 fromGeometry 决定。
+背景和前景效果根据初始位置和大小进行初始化。
+2.动画启动：
+调用 start 函数启动动画。
+动画开始时，窗口的位置和大小从 fromGeometry 平滑过渡到 toGeometry。
+3.动画过程：
+XAnimator 和 YAnimator 分别改变窗口的 x 和 y 坐标，使窗口平滑移动。
+PropertyAnimation 改变窗口的 width 和 height，使窗口平滑调整大小。
+OpacityAnimator 改变前景效果的透明度，使其逐渐消失。
+4.动画完成：
+当所有动画完成后，发出 finished 信号，表示动画结束。
+2.3.4.8 窗口切换动画
+窗口切换主要功能是提供一个界面，用户可以通过点击或滑动来选择他们想要切换到的窗口。当用户切换窗口时，当前窗口会平滑地淡出，而新窗口会平滑地淡入。
+这些动画都是通过QML的动画框架实现的，使用了QMLParallelAnimation和SequentialAnimation动画组件同时或按顺序执行多个动画。每个动画都使用了Qt数字属性变动的动画组件NumberAnimation来改变数值，例如透明度和缩放比例。使用了Qt提供的特定的动画曲线OutExpo来实现平滑的过渡效果。
+2.3.4.9 多任务视图动画
+多任务视图是一个用于在桌面环境中显示和管理多个工作空间和窗口的组件。它通过定义不同的状态和动画效果，实现了平滑的界面切换和交互。
+多任务视图动画功能主要用于在不同视图状态之间平滑过渡，包括窗口的缩放、移动、透明度变化等，以提升用户体验。具体表现为在进入任务视图、退出任务视图以及拖拽窗口时，窗口会以动画形式进行位置、大小和透明度的变化。
+多任务视图动画的原理是通过QML中的状态机（State Machine）和行为动画（Behavior Animation）来实现的。状态机定义了不同视图状态（如初始状态、部分状态、任务视图状态）及其对应的属性变化，而行为动画则负责在状态切换时平滑地改变这些属性，如窗口的位置、大小和透明度。通过这种方式，确保了用户在不同视图之间的切换过程流畅自然。
+2.3.5多用户共享
+Treeland 支持多个用户同时使用合成器，用以优化用户切换速度和用户体验。在 Treeland 运行过程中，支持来自用户的显示注册请求，当用户首次登录时，systemd 服务单元会启动一个常驻服务，用来绑定 Treeland 的显示服务，并调用接口完成显示服务注册。
+2.4关键流程设计
+
+图2.3Treeland启动流程时序图
+如图所示，Treeland启动流程为：
+1.系统级别的systemd服务启动后会启动ddm服务，ddm在启动时会拉起两个进程，一个是Treeland进程，一个是greeter进程，注意，此时ddm作为“dde”这个特殊用户启动的，所以其启动的两个进程以及后面的dde-session也为“dde”用户。
+2.用户可以通过greeter进行认证，greeter将认证信息发给ddm，ddm将认证信息拿给pam进行认证，认证成功后启动dde-sesion，认证失败给greeter相关提示。
+3.dde-session被启动后，首先会设置Wayland环境变量，然后dde-session会启动一个分身进程，该进程为systemduser级别的服务，当该服务被启动时，systemd会拉起所有“Partof”该服务的其他桌面服务，具有代表性的前后端为dde-shell和deepin-service-manager。
+4.当用户进行注销操作时，ddm会收到注销操作信号，然后退出dde-session主进程，dde-session分身进程在监听过程中发现主进程退出了，就会执行清理动作，并退出服务，此时“Partof”它的其他服务也会被stop掉，至此完成用户的注销操作。
+
+图2.4鼠标事件分发流程
+wlroots使用libinput接收设备的输入,可支持触摸屏、触摸板、指点杆等高级设备。图2.4展示了本方案处理鼠标事件的流程，在使用wlr_seat将事件发给客户端之前，先交由QQuick Window处理,由QtQuick的事件分发机制计算鼠标事件的接收对象,之后将事件发送到QQuickItem所对应的客户端窗口，如果此QQuickItem无对应的客户端窗口，则抛弃此事件。使用上述机制，可以避免手动实现复杂的事件分发流程，更深入的利用Qt已有的功能。
+将输入事件交由Qt处理，可以对接Qt的所有事件加工接口，比如使用PinchArea进行手势识别，使用MultiPointTouchArea支持多点触控。而不必像KWim那样重新实现所有的相关逻辑，与Qt生态结合的能力大大加强。
+
+图2.5 QQuickWindow + wlroots 渲染流程
+各角色的含义如下:
+QQuickItem(wlr_surface)：客户端窗口，wlr_surface和QQuickItem一一对应
+Window：QQuickWindow，支持多个wlr_output
+Control：QQuickRenderControl
+Context：自定义的QPlatformOpenGLContext
+wlr_output：wlroots封装的屏幕对象
+上图未展wlr_output_attach_render的细节,其实现是使glBindFramebuffer将wlr_output对应的OpenGL FBO绑定到当前上下文，至此，使用OpenGL API即可加工此 FBO，等价于操作其对应的 GBM Bufer 对象。
+2.5关键接口设计
+wayland协议
+协议名称	版本	简介
+wl_shm	1	为共享内存提供支持的单例全局对象
+wl_drm	2	用于与DirectRenderingManager（DRM）集成
+wl_output	4	合成器输出区域
+wl_seat	8	输入设备组，一个座位是一组键盘、指针和触摸设备
+wl_compositor	5	合成器单例。该对象是一个单例全局对象
+wl_subcompositor	1	次表面合成器
+wl_data_device_manager	3	单例全局对象，提供对客户端间数据传输机制（例如复制粘贴和拖放）的访问
+zwp_primary_selection_device_manager_v1	1	主要选择设备管理器是一个单例全局对象，提供对主要选择的访问
+zwp_text_input_manager_v1	1	文本输入管理器v1版本
+zwp_text_input_manager_v2	1	文本输入管理器v2版本
+zwp_text_input_manager_v3	1	文本输入管理器v3版本
+zwp_input_method_manager_v2	1	合成器和输入法交互的协议
+zwp_pointer_gestures_v1	3	触摸板手势
+为给定指针提供语义触摸板手势的全局接口。
+wp_cursor_shape_manager_v1	1	光标形状管理器
+该全局提供了一种替代的、可选的方式来设置光标图像
+xdg_wm_base	3	创建桌面风格的表面
+xdg_wm_base接口作为全局对象公开，使客户端能够将其wl_surface转换为桌面环境中的窗口
+xdg_activation_v1	1	提供激活窗口的机制，允许应用程序请求将其窗口置于前景并获得焦点
+zxdg_decoration_manager_v1	1	管理窗口装饰的协议，允许客户端请求和设置窗口的外观和装饰
+wp_presentation	1	提供对显示内容的呈现反馈，允许客户端获取其内容何时被显示的信息
+wp_security_context_manager_v1	1	管理安全上下文，允许客户端设置和获取与安全相关的上下文信息。
+wp_viewporter	1	允许客户端在不同的缩放级别下渲染其内容
+wp_single_pixel_buffer_manager_v1	1	管理单像素缓冲区，允许客户端使用单像素缓冲区进行渲染
+wp_fractional_scale_manager_v1	1	允许客户端请求和管理分数缩放，支持更精细的缩放控制
+ext_idle_notifier_v1	1	提供空闲状态通知，允许客户端在用户空闲时接收通知
+zwp_idle_inhibit_manager_v1	1	管理空闲抑制，允许应用程序防止系统进入空闲状态
+zwp_relative_pointer_manager_v1	1	提供相对指针输入管理，允许客户端处理相对位置的输入事件
+zwp_pointer_constraints_v1	1	管理指针约束，允许客户端限制指针的移动范围
+ext_session_lock_manager_v1	1	管理会话锁定，允许客户端请求锁定和解锁会话
+wp_tearing_control_manager_v1	1	管理撕裂控制，允许客户端请求和管理显示撕裂的行为
+zwp_tablet_manager_v2	1	管理平板输入设备，提供对平板设备的支持和配置
+zwp_linux_dmabuf_v1	4	提供LinuxDMA缓冲区的支持，允许高效的图像传输和共享
+zxdg_output_manager_v1	3	管理输出设备，允许客户端查询和配置显示输出
+xwayland_shell_v1	1	提供Xwayland的支持，允许Wayland合成器与X11应用程序进行交互
+
+wlroots协议
+协议名称	版本	简介
+zwlr_gamma_control_manager_v1	1	管理输出设备的伽马控制，允许客户端调整显示设备的颜色和亮度
+zwlr_output_manager_v1	4	管理输出设备的生命周期和状态，允许客户端查询和配置输出设备
+zwlr_virtual_pointer_manager_v1	2	管理虚拟指针设备，允许客户端创建和管理虚拟指针输入
+zwp_virtual_keyboard_manager_v1	1	管理虚拟键盘输入，允许客户端创建和管理虚拟键盘
+org_kde_kwin_server_decoration_manager	1	管理窗口装饰，允许客户端与合成器的装饰系统交互
+zwlr_export_dmabuf_manager_v1	1	管理DMA缓冲区的导出，允许客户端将缓冲区导出以供其他客户端使用
+zwlr_screencopy_manager_v1	1	提供屏幕复制功能，允许客户端捕获屏幕内容并进行处理
+zwlr_data_control_manager_v1	1	管理数据控制，允许客户端处理剪贴板和数据传输
+zwlr_input_inhibit_manager_v1	1	管理输入抑制，允许应用程序请求抑制输入事件
+zwlr_foreign_toplevel_manager_v1	3	管理外部顶层窗口，允许客户端与其他合成器的顶层窗口进行交互
+zwlr_output_power_manager_v1	1	管理输出设备的电源状态，允许客户端控制输出设备的电源
+zwlr_layer_shell_v1	4	提供层次壳管理，允许客户端在不同层次上管理窗口和界面元素
+
+自定义协议
+协议名称	版本	简介
+treeland_dde_shell_manager_v1	1	管理Treeland桌面环境的壳，提供窗口管理和特殊事件监控
+treeland_foreign_toplevel_manager_v1	1	允许客户端获取顶层信息
+treeland_output_manager_v1	1	管理Treeland环境中的输出设备，允许配置和查询显示输出
+treeland_wallpaper_color_manager_v1	1	管理Treeland环境中的壁纸颜色，允许客户端设置和获取壁纸颜色
+treeland_window_management_v1	1	提供Treeland环境中的窗口管理功能，允许客户端管理窗口状态
+treeland_virtual_output_manager_v1	1	管理Treeland环境中的虚拟输出设备，允许创建和配置虚拟显示
+treeland_shortcut_manager_v1	1	快捷键注册管理
+treeland_capture_manager_v1	1	提供屏幕和窗口捕获功能，允许客户端捕获屏幕和窗口内容进行处理
+treeland_personalization_manager_v1	1	Treeland环境中的个性化配置协议
+
+Wayland协议的基本组成可以分为几个关键部分，每个部分在协议的功能和结构中扮演着重要角色。以下是Wayland协议的基本组成部分的详细描述：
+1. Interface（接口）
+- 定义: 接口是Wayland协议的核心组成部分，定义了客户端和服务器之间的交互方式。
+- 内容:
+  - 名称: 接口的唯一标识符。
+  - 版本: 接口的版本号，允许对接口进行向后兼容的更改。
+  - 描述: 对接口功能的简要说明。
+  - 请求: 该接口支持的请求列表。
+  - 事件: 该接口可以发送的事件列表。
+  - 枚举: 该接口定义的枚举类型。
+
+2.Request（请求）
+- 定义: 请求是客户端向服务器发送的操作指令，表示希望执行某个操作。
+- 内容:
+  - 名称: 请求的唯一标识符。
+  - 类型: 请求的类型（如普通请求、析构请求等）。
+  - 描述: 对请求功能的简要说明。
+  - 参数: 请求所需的参数列表，定义了每个参数的名称、类型和描述。
+
+3. Event（事件）
+- 定义: 事件是服务器向客户端发送的通知，表示某个状态的变化或操作的结果。
+- 内容:
+  - 名称: 事件的唯一标识符。
+  - 描述: 对事件功能的简要说明。
+  - 参数: 事件所需的参数列表，定义了每个参数的名称、类型和描述。
+
+4. Argument（参数）
+- 定义: 参数是请求或事件的组成部分，提供了执行操作所需的信息。
+- 内容:
+  - 名称: 参数的名称。
+  - 类型: 参数的数据类型（如整数、字符串、枚举等）。
+  - 摘要: 对参数的简要描述，说明其用途。
+
+5. Enum（枚举）
+- 定义: 枚举是定义一组相关常量的类型，通常用于表示状态或选项。
+- 内容:
+  - 名称: 枚举的唯一标识符。
+  - 描述: 对枚举的简要说明。
+  - 条目: 枚举中定义的具体值列表。
+
+6. Entry（条目）
+- 定义: 条目是枚举中的具体值，表示特定的状态或选项。
+- 内容:
+  - 名称: 条目的名称。
+  - 值: 条目的整数值。
+  - 版本: 条目自哪个版本开始可用。
+
+其结构如下图2.6所示：
+
+图2.6Wayland协议框架图
+
+treeland_dde_shell_manager_v1协议
+treeland_dde_shell_manager_v1接口用来管理treeland_dde_shell_surface_v1、treeland_window_overlap_checker、treeland_dde_active_v1
+、treeland_multitaskview_v1接口。
+名称	类型	描述
+get_window_overlap_checker	请求	创建treeland_dde_shell_handle_v1 对象，表示打开的顶层窗口
+get_shell_surface	请求	根据wl_surface对象创建treeland_dde_shell_surface_v1
+get_treeland_dde_active 	请求	3.根据wl_seat对象创建get_treeland_dde_active
+
+treeland_dde_shell_handle_v1 对象表示打开的顶层窗口。每个应用程序可能有多个打开的顶层。
+名称	类型	描述
+destroy	请求	销毁treeland_dde_shell_handle_v1对象
+update	请求	更改壳表面的位置。坐标为全局坐标
+leave	事件	当窗口不重叠时发送此事件。
+此事件仅发送一次。
+enter	事件	当窗口重叠时发送此事件。
+此事件仅发送一次。
+
+
+
+
+
+
+
+
+
+
+
+
+treeland_dde_shell_surface_v1接口是一个可由wl_surface实现的接口，旨在为提供壳用户界面的实现提供支持。该接口提供了一系列请求，用于设置表面角色、跳过状态、位置以及在输出坐标中的自动放置。在服务器端，当相关的wl_surface被销毁时，该对象会自动销毁。在客户端，必须在销毁wl_surface对象之前调用treeland_dde_shell_surface_v1.destroy()。
+名称	类型	描述
+destroy	请求	销毁treeland_dde_shell_surface_v1对象
+set_surface_position	请求	更改壳表面的位置。坐标为全局坐标
+set_role	请求	为该表面分配角色
+set_auto_placement	请求	将表面放置在光标区域的底部。不要与set_surface_position一起使用以避免异常
+set_skip_switcher	请求	使窗口不出现在切换器中
+set_skip_dock_preview	请求	使窗口不出现在任务栏停靠预览中
+set_skip_muti_task_view	请求	使窗口不出现在多任务视图中
+
+treeland_dde_active_v1接口用于监控特殊事件。该接口提供了一系列请求和事件，允许客户端接收关于活动状态变化的通知。
+名称	类型	描述
+destroy	事件	销毁treeland_dde_active_v1对象。该请求用于清理和释放与该接口相关的资源
+active_in	请求	当对象变为活动状态时发送的事件
+active_out	请求	当对象变为非活动状态时发送的事件
+start_drag 	请求	当合成器开始拖动操作时发送的事件。该事件通知客户端拖动操作的开始。
+drop	请求	当合成器完成拖放操作时发送的事件。该事件通知客户端拖放操作的结束。
+
+treeland-personalization-manager-v1
+获取设置类型上下文接口，对应个性化管理下的各个可配置分类
+请求	上下文协议	描述
+get_window_context	treeland_personalization_window_context_v1	窗口相关的配置， 圆角， 阴影， 边框大小
+get_wallpaper_context	treeland_personalization_wallpaper_context_v1	设置屏幕壁纸
+get_cursor_context	treeland_personalization_cursor_context_v1	设置光标主题以及大小
+get_font_context	treeland_personalization_font_context_v1	设置系统比例字体，等宽字体字体集以及大小
+get_appearance_context	treeland_personalization_appearance_context_v1	设置主题外观的修 浅色，黑色，圆角大小， 图标主题， 活动色， 窗口透明度等。
+
+treeland_personalization_wallpaper_context_v1 上下文的内容， 设置的图像文件描述符， 窗口apid标识符， 屏幕名称等信息用来与xdg desktop portal的设置接口兼容。可以通过xdg desktop portal的接口设置桌面壁纸。
+名称	类型	描述
+set_fd	请求	设置代表图片的文件描述符
+参数类型
+fd image 图片文件描述符
+string metadata 文件关联的输出屏幕，图片文件路径json字符串
+set_identifier	请求	标识设置的应用窗口
+string identifier 应用程序的appid
+set_output	请求	兼容xdg desktop portal的配置项
+string output 系统屏幕名称
+set_on	请求	兼容xdg desktop portal的配置项
+options configure
+枚举类容:
+preview 显示壁纸预览询问是否设置图片。
+background 仅设置背景图片。
+lockscreen 仅设置锁屏图片。
+
+set_isdark	请求	当前壁纸的整体色彩表现是否为暗色系
+true:  暗色系
+false: 浅色系
+commit	请求	一次性提交上述的配置内容也可分别提交
+get_metadata	请求	获取当前用户的所有壁纸元信息， 包含屏幕所属屏幕，壁纸路径等信息
+destroy	请求	销毁当前的壁纸设置协议接口对象
+metadata	事件	包含所有壁纸元信息的json字符串数据。
+
+treeland_personalization_cursor_context_v1 控制鼠标的个性化协议。
+名称	类型	描述
+set_theme	请求	设置鼠标主题
+get_theme	请求	获取鼠标主题
+set_size	请求	设置鼠标大小
+get_size	请求	获取鼠标大小
+commit	请求	提交配置
+destroy	请求	销毁当前的个性化协议
+verfity	事件	设置完成将发送此事件
+1： 成功
+0： 失败
+theme	事件	鼠标主题更改发送此事件
+size	事件	鼠标大小更改发送此事件
+
+treeland_personalization_window_context_v1控制窗口个性化协议
+名称	类型	描述
+set_blend_mode	请求	设置窗口的混合模式
+transparent: 普通混合模式仅仅设置alapha通道
+wallpaper：窗口混合壁纸
+blur：窗口背景模糊
+
+set_round_corner_radius	请求	设置窗口圆角半径
+set_shadow	请求	设置窗口阴影
+int radius: 阴影半径
+int offset_x: 阴影x轴值
+int offset_y: 阴影y轴值
+int r, g, b, a: RGBA颜色通道值 
+set_border	请求	设置窗口边框值
+width: 窗口边框宽度
+int r, g, b, a: RGBA颜色通道值 
+set_titlebar	请求	设置窗口标题栏是否启用
+true：显示窗口标题栏
+false: 隐藏窗口标题栏
+destroy	请求	销毁窗口上下文对象
+
+treeland_personalization_font_context_v1控制系统字体及其大小。
+名称	类型	描述
+font	事件	比例字体改变通知事件
+monospace_font	事件	等宽字体改变通知事件
+font_size	事件	字体大小改变通知事件
+set_font_size	请求	设置字体大小
+get_font_size	请求	获取字体大小
+set_font	请求	设置比例字体集名称
+get_font	请求	获取比例字体集名称
+set_monospace_font	请求	设置等宽字体集名称
+get_monospace_font	请求	获取等宽字体集名称
+destroy	请求	销毁当前字体配置上下文对象
+
+treeland_personalization_appearance_context_v1控制系统整体ui外观。
+round_corner_radius	事件	圆角半径改变后的事件
+icon_theme	事件	主题图标改变后的通知事件
+active_color	事件	主题活动色改变后的通知事件
+window_opacity	事件	窗口不透明度变更后的通知事件
+window_theme_type	事件	窗口主题类型更改通知事件
+auto: 自动根据时区光照来计算
+light: 浅色系主题
+dark：暗色系主题
+window_titlebar_height	事件	窗口高度变更后的通知事件
+set_round_corner_radius	请求	设置窗口圆角半径大小
+get_round_corner_radius	请求	获取窗口圆角半径大小
+set_icon_theme	请求	设置系统窗口主题
+get_icon_theme	请求	获取系统窗口主题
+set_active_color	请求	设置系统窗口活动色
+get_active_color	请求	获取系统窗口活动色
+set_window_opacity	请求	设置窗口不透明
+get_window_opacity	请求	获取窗口不透明
+set_window_theme_type	请求	设置窗口主题类型
+get_window_theme_type	请求	获取窗口主题类型
+set_window_titlebar_height	请求	设置窗口标题栏高度
+get_window_titlebar_height	请求	获取窗口标题栏高度
+destroy	请求	销毁当前外观上下文
+
+treeland-wallpaper-color-v1.xml
+壁纸取色协议用于通知客户端桌面壁纸为暗色还是亮色，进而决定应用本体的色调与壁纸更搭配。壁纸暗亮色的计算方法如图2.7：
+
+图2.7壁纸亮暗色计算方式
+为减小 Treeland 计算负担，此计算由设置壁纸的客户端来完成，通过 treeland-personalization-manager-v1 协议接口在设置壁纸的同时设置暗亮色，Treeland 只负责存储壁纸的暗亮色信息，并通过 treeland wallpaper color manager 协议转发这个信息。
+名称	类型	描述
+watch	请求	string:output 客户端关注 output 屏幕对应壁纸变化
+unwatch	请求	string:output 客户端不再关注此 output 上壁纸变化
+output_color	事件	string:output，uint isdark 当屏幕壁纸变化时，向关注此屏幕的所有客户端发送新的壁纸暗亮色信息
+
+treeland-capture-unstable-v1.xml
+treeland_capture_manager_v1创建捕获上下文。
+名称	类型	描述
+destroy	请求	销毁当前捕获管理器
+get_context	请求	创建捕获上下文
+treeland_capture_context_v1选择源，创建帧或者会话。
+名称	类型	描述
+source_type	枚举	捕获源类型
+source_failure	枚举	捕获源选择错误类型
+select_source	请求	选择一个捕获源
+source_ready	事件	通知选择的捕获源信息
+source_failed	事件	通知捕获源错误原因
+toggle_selection	请求	请求关闭或者开启选择交互
+capture	请求	单次捕获，创建捕获帧
+create_session	请求	创建捕获会话
+treeland_capture_frame_v1捕获帧读取截图结果。
+名称	类型	描述
+destroy	请求	销毁当前捕获帧
+flags	枚举	捕获帧的特性标志
+buffer	事件	捕获帧支持的拷贝格式
+buffer_done	事件	拷贝格式发送完毕通知
+copy	请求	拷贝捕获结果到指定缓冲区
+flags	事件	通知当前捕获帧的特性标志
+ready	事件	通知捕获帧可以拷贝
+failed	事件	通知捕获失败，无法拷贝
+treeland_capture_session_v1捕获会话持续获取捕获数据。
+名称	类型	描述
+cancel_reason	枚举	取消当前帧捕获原因
+flags	枚举	当前捕获帧的特性标志
+destroy	请求	销毁当前捕获会话
+start	请求	开始捕获会话，持续产生捕获帧
+frame	事件	通知当前帧的信息
+object	事件	通知当前帧数据
+ready	事件	通知当前帧准备完毕
+cancel	事件	通知当前帧被取消
+
+treeland-window-management-v1.xml 
+管理应用程序窗口的基本功能，包括显示和隐藏桌面的请求以及监听桌面状态变化的事件。
+名称	类型	描述
+desktop_state	枚举	normal：0，正常状态
+show：1， 显示桌面
+preview_show：2，预览桌面
+desktop_state	事件	通知客户端桌面模式的变化
+show_desktop	请求	设置桌面状态
+destroy	请求	销毁窗口管理对象
+
+treeland-virtual-output-manager-v1.xml
+本协议提供了创建和管理虚拟输出的功能，主要支持多屏幕复制模式。
+treeland_virtual_output_manager_v1创建一个管理器，允许创建虚拟输出，虚拟输出可以用于多屏幕复制模式，通过镜像多个 wl_output 输出来实现。
+名称	类型	描述
+create_virtual_output	请求	创建一个虚拟输出
+get_virtual_output_list	请求	获取虚拟输出名称列表
+get_virtual_output	请求	通过虚拟输出名称获取对应的 treeland_virtual_output_v1 对象
+virtual_output_list	事件	发送虚拟输出名称列表给客户端
+
+treeland_virtual_output_v1 该接口表示一个虚拟屏幕输出对象
+名称	类型	描述
+outputs	事件	当数组中的任何屏幕发生变化时发送此事件
+error	枚举	invalid_group_name：0，组名称为空
+invalid_screen_number：1，申请复制模式的屏幕数量少于 2
+invalid_output：2，输出不存在
+error	事件	当发生错误时发送此事件，终止客户端发出的复制模式请求。
+destroy	请求	销毁输出
+
+2.6关键数据结构设计
+Treeland 内部基本都是基础数据类型，并没有需要特别说明的数据结构，但Treeland使用DConfig作为其配置管理，配置管理主要用作个性化设置。
+2.7主要人机交互设计
+
+图2.8多任务视图布局
+
+
+图2.9贴边窗口布局
+
+3非功能性设计
+3.1安全性
+1.greeter输入密码以memfd的方式进行传输，由内核层保证fd的安全性。
+2.Wayland 协议访问控制机制：
+Treeland 作为 Wayland 协议的实现方，协议的调用，走到 Treeland 这里都会有一个 WClient对象，通过WClient 对象可以知道客户端的 pidfd，pidfd作为客户端的身份标识；将 pidfd 与一个字符串（字符串标识具体的权限，如截屏、剪切板访问等等）通过DBus发送给权限认证程序进行认证，收到认证结果后，决定该协议是否继续执行。
+Treeland 实现一个类，该类包含了 Treeland 所有权限的字符串，每个字符串对应一个枚举，该类封装一个接口给内部调用，该接口调用外部的权限检查接口，得到权限认证结果后再继续进行该协议的业务逻辑。
+注：截图录屏与剪切板的安全性由DDE访问控制机制来保障。
+3.2性能
+对于窗口合成器来说，最重要的是渲染性能。Treeland在设计之初就已经将wlroots与QtQuick结合，让Treeland可以无缝切换渲染后端（CPU、OpenGL/ES、Vulkan）。
+Treeland还支持硬光标，以减少功耗，提升渲染性能。
+3.3可靠性
+Treeland崩溃自恢复：
+1.改造系统组件将Xwayland与treeland关系改造成父子进程，并且标记Xwayland信息。
+2.看护treeland进程和Xwayland进程，treeland进程崩溃启动一个新的进程，恢复通信。Xwayland崩溃则重新启动新的Xwayland,X11应用全部退出，Wayland不受影响。
+3.4易用性
+Treeland作为窗口管理器，提供以下易用功能：
+支持Tab健与常用快捷键
+支持国际化
+支持全局无缝过渡动画
+支持无缝切换用户
+支持动态壁纸
+支持屏幕可变刷新率
+支持多屏不同缩放比
+支持触摸设备
+支持手势跟手操作
+3.5可用性
+Treeland通过 systemd 的 service 监测运行状态，崩溃后自动恢复启动。
+3.6兼容性
+Treeland对外接口统一使用Wayland协议处理，所有Wayland协议都进行版本控制以保证兼容性。
+3.7韧性
+Treeland 会检查应用的位置，确保一直显示在屏幕可见区域，防止用户失误拖动到屏幕外后无法拖回。
+3.8隐私
+Treeland不涉及任何敏感信息，Treeland日志中不允许打印任何敏感信息，包括用户名、密码，如需打印，需使用uid，或其他匿名化方式处理。
+3.9可维护性
+1.Treeland、Waylib、qwlroots 在打印日志时，不允许使用 qDebug() 这种，必须使用分类日志: qCDebug(category)
+2.Treeland 使用 DConfig 进行配置管理
+4部署与实施
+Treeland随系统版本发布，使用deb包进行部署，不需要额外的部署流程。
+5专利
+以列表形式提供计划产生的专利，如：
+表5.1专利列表
+专利点	技术关键点和欲保护点	有益效果
+多用户共用一个合成器	多用户切换后，图形输出的关键技术	多用户无缝切换

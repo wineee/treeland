@@ -1,0 +1,18 @@
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  bugprone-use-after-move,
+  bugprone-infinite-loop,
+  bugprone-crtp-constructor-accessibility,
+  bugprone-parent-virtual-call
+
+WarningsAsErrors: >
+  bugprone-use-after-move,
+  bugprone-infinite-loop,
+  bugprone-parent-virtual-call
+
+HeaderFilterRegex: '.*'
+
+SystemHeaders: false
+
+FormatStyle: none

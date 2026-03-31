@@ -20,14 +20,13 @@ public:
 
     void saveLastSize(const QString &appId, const QSize &size);
 
-    void withSplashConfigFor(
-        const QString &appId,
-        QObject *context,
-        std::function<void(const QSize &size,
-                           const QString &darkPalette,
-                           const QString &lightPalette,
-                           qlonglong splashThemeType)> callback,
-        std::function<void()> skipCallback) const;
+    void withSplashConfigFor(const QString &appId,
+                             QObject *context,
+                             std::function<void(const QSize &size,
+                                                const QString &darkPalette,
+                                                const QString &lightPalette,
+                                                qlonglong splashThemeType)> callback,
+                             std::function<void()> skipCallback) const;
 
 private:
     AppConfig *configForApp(const QString &appId) const;
