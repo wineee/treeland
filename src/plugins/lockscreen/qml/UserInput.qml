@@ -13,6 +13,7 @@ Item {
     height: 300
 
     property string normalHint: qsTr("Please enter password")
+    readonly property string effectiveUsername: usernameInput.text.trim()
 
     /**************/
     /* Components */
@@ -53,10 +54,15 @@ Item {
                 color: Qt.rgba(1, 1, 1, 0.1)
             }
 
-            D.QtIcon {
+            D.DciIcon {
                 id: avatar
                 anchors.fill: parent
+                name: "login_user"
                 visible: false
+                sourceSize {
+                    width: 120
+                    height: 120
+                }
             }
 
             Rectangle {
@@ -82,14 +88,36 @@ Item {
             }
         }
 
-        Text {
-            text: "User"
-            id: username
-            font.bold: true
-            font.pixelSize: D.DTK.fontManager.t2.pixelSize
-            font.family: D.DTK.fontManager.t2.family
-            color: palette.windowText
+        Rectangle {
+            id: usernameBox
+            width: loginGroup.width
+            height: 30
             anchors.horizontalCenter: parent.horizontalCenter
+
+            color: Qt.rgba(1, 1, 1, 0.18)
+            radius: 6
+
+            TextField {
+                id: usernameInput
+                anchors.fill: parent
+                placeholderText: qsTr("Username")
+                placeholderTextColor: Qt.rgba(1.0, 1.0, 1.0, 0.6)
+                color: loginGroup.effectiveUsername.length !== 0 ? palette.windowText : Qt.rgba(1.0, 1.0, 1.0, 0.6)
+                font.bold: true
+                font.pixelSize: D.DTK.fontManager.t2.pixelSize
+                font.family: D.DTK.fontManager.t2.family
+                selectByMouse: true
+                verticalAlignment: Text.AlignVCenter
+
+                background: Item {
+                }
+                Keys.onPressed: function (event) {
+                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        passwordField.forceActiveFocus()
+                        event.accepted = true
+                    }
+                }
+            }
         }
 
         TextField {
@@ -215,7 +243,7 @@ Item {
             bottom: userCol.bottom
             leftMargin: 20
         }
-        enabled: passwordField.length != 0
+        enabled: passwordField.length != 0 && (GreeterProxy.hasActiveSession || loginGroup.effectiveUsername.length != 0)
         font: D.DTK.fontManager.t8
         background: RoundBlur {
             anchors.fill: parent
@@ -301,19 +329,29 @@ Item {
     /*****************************/
 
     function updateUser() {
-        let currentUser = UserModel.get(UserModel.currentUserName)
-        username.text = currentUser.realName.length === 0 ? currentUser.name : currentUser.realName
         passwordField.text = ''
-        avatar.fallbackSource = currentUser.icon
         hintText.text = normalHint
     }
 
     function userLogin() {
         let user = UserModel.get(UserModel.currentUserName)
-        if (user.loggedIn)
+        if (GreeterProxy.hasActiveSession) {
+            if (loginGroup.effectiveUsername.length !== 0 && loginGroup.effectiveUsername !== user.name) {
+                hintText.text = qsTr("Only the current user can unlock.")
+                return
+            }
+
             GreeterProxy.unlock(user.name, passwordField.text)
-        else
-            GreeterProxy.login(user.name, passwordField.text, SessionModel.currentIndex)
+            return
+        }
+
+        if (loginGroup.effectiveUsername.length === 0) {
+            hintText.text = qsTr("Please enter username.")
+            usernameInput.forceActiveFocus()
+            return
+        }
+
+        GreeterProxy.login(loginGroup.effectiveUsername, passwordField.text, SessionModel.currentIndex)
     }
 
     Connections {
