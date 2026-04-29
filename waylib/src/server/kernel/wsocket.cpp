@@ -19,6 +19,7 @@
 #include <sys/un.h>
 #include <signal.h>
 #include <errno.h>
+#include <unistd.h>
 
 struct wl_event_source;
 
@@ -49,6 +50,16 @@ static int wl_socket_lock(const QString &socketFile)
 
     if (flock(fd_lock, LOCK_EX | LOCK_NB) < 0) {
         qCWarning(waylibSocket) << "Failed to lock" << lockFile << "- another compositor may be running";
+        const QByteArray runtimeDir = qgetenv("XDG_RUNTIME_DIR");
+        const QByteArray waylandDisplay = qgetenv("WAYLAND_DISPLAY");
+        qCWarning(waylibSocket) << "Startup conflict context:"
+                                << "pid=" << getpid()
+                                << "uid=" << getuid()
+                                << "runtimeDir="
+                                << (runtimeDir.isEmpty() ? QByteArray("<empty>") : runtimeDir)
+                                << "display="
+                                << (waylandDisplay.isEmpty() ? QByteArray("<empty>") : waylandDisplay)
+                                << "socketFile=" << socketFile;
         goto err_fd;
     }
 

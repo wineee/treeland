@@ -305,7 +305,7 @@ Item {
                 y: hintBtn.height + 11
                 hintText: {
                     let user = UserModel.get(UserModel.currentUserName)
-                    return user.passwordHint
+                    return user && user.passwordHint ? user.passwordHint : ""
                 }
             }
 
