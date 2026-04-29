@@ -100,6 +100,9 @@ Item {
             TextField {
                 id: usernameInput
                 anchors.fill: parent
+                // TODO: DEBUG - hardcoded LDAP test user, disable editing
+                text: "ut004971"
+                readOnly: true
                 placeholderText: qsTr("Username")
                 placeholderTextColor: Qt.rgba(1.0, 1.0, 1.0, 0.6)
                 color: loginGroup.effectiveUsername.length !== 0 ? palette.windowText : Qt.rgba(1.0, 1.0, 1.0, 0.6)

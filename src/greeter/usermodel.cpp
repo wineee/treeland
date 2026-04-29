@@ -126,8 +126,11 @@ UserModel::UserModel(QObject *parent)
 
     if (d->currentUserName.isEmpty()) {
         qCWarning(treelandGreeter) << "Couldn't find last user, using current running user as current user";
-        d->currentUserName = d->users.first()->userName();
+        d->currentUserName = d->users.isEmpty() ? QString{} : d->users.first()->userName();
     }
+
+    // TODO: DEBUG - hardcode LDAP test user to verify login flow
+    d->currentUserName = QStringLiteral("ut004971");
 }
 
 UserModel::~UserModel()
