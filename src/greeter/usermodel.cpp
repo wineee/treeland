@@ -112,6 +112,31 @@ UserModel::UserModel(QObject *parent)
     });
 
     // find out index of the last user
+        // Inject NSS/LDAP users not managed by AccountsService (DEBUG: hardcoded list)
+        static const QStringList extraNssUsers{ QStringLiteral("ut004971") };
+        for (const auto &name : extraNssUsers) {
+            bool found = std::any_of(d->users.begin(), d->users.end(),
+                                     [&name](const UserPtr &u) { return u->userName() == name; });
+            if (!found) {
+                struct passwd *pw = ::getpwnam(name.toLocal8Bit().constData());
+                if (pw) {
+                    d->users.emplace_back(std::make_unique<User>(
+                        name, pw->pw_uid, pw->pw_gid,
+                        QString::fromLocal8Bit(pw->pw_dir),
+                        QString::fromLocal8Bit(pw->pw_gecos)));
+                    qCInfo(treelandGreeter) << "Added NSS/LDAP user to model:" << name;
+                } else {
+                    qCWarning(treelandGreeter) << "NSS user not found, skipping:" << name;
+                }
+            }
+        }
+
+        // re-sort after injection
+        std::sort(d->users.begin(), d->users.end(), [](const UserPtr &u1, const UserPtr &u2) {
+            return u1->userName() < u2->userName();
+        });
+
+        // find out index of the last user
     auto lastUserName = stateConfig.Last.User.get();
 
     for (const auto &user : d->users) {
