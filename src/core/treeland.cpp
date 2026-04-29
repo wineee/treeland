@@ -81,7 +81,14 @@ public:
 
         auto updateUser = [this, userModel] {
             auto user = userModel->currentUser();
-            onCurrentChanged(user ? user->UID() : getuid());
+            if (!user) {
+                qCInfo(treelandDBus)
+                    << "Current user is not managed by AccountsService, keep existing compositor locale:" 
+                    << userModel->currentUserName();
+                return;
+            }
+
+            onCurrentChanged(user->UID());
         };
 
         connect(userModel, &UserModel::currentUserNameChanged, this, updateUser);
@@ -116,7 +123,9 @@ public:
             helper->qmlEngine()->singletonInstance<UserModel *>("Treeland", "UserModel");
         auto user = userModel->getUser(uid);
         if (!user) {
-            qCWarning(treelandDBus) << "user " << uid << " has been added but couldn't find it.";
+            qCInfo(treelandDBus)
+                << "Current session user is not managed by AccountsService, skip locale update for uid:"
+                << uid;
             return;
         }
 

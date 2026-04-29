@@ -335,13 +335,14 @@ Item {
 
     function userLogin() {
         let user = UserModel.get(UserModel.currentUserName)
+        let currentUserName = user.name ? user.name : UserModel.currentUserName
         if (GreeterProxy.hasActiveSession) {
-            if (loginGroup.effectiveUsername.length !== 0 && loginGroup.effectiveUsername !== user.name) {
+            if (loginGroup.effectiveUsername.length !== 0 && loginGroup.effectiveUsername !== currentUserName) {
                 hintText.text = qsTr("Only the current user can unlock.")
                 return
             }
 
-            GreeterProxy.unlock(user.name, passwordField.text)
+            GreeterProxy.unlock(currentUserName, passwordField.text)
             return
         }
 

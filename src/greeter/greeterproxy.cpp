@@ -480,14 +480,13 @@ void GreeterProxy::readyRead()
             int sessionId;
             input >> user >> sessionId;
 
-            // NOTE: maybe DDM will active dde user.
-            if (!userModel()->getUser(user)) {
-                qCInfo(treelandGreeter) << "activate user, but switch to greeter";
-                lock();
-                break;
-            }
-
             userModel()->setCurrentUserName(user);
+
+            if (!userModel()->getUser(user)) {
+                qCInfo(treelandGreeter)
+                    << "activate user not managed by AccountsService:" << user
+                    << ", continue with external account session";
+            }
 
             qCInfo(treelandGreeter) << "activate successfully: " << user << ", XDG_SESSION_ID: " << sessionId;
         } break;

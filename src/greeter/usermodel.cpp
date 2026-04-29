@@ -63,7 +63,9 @@ UserModel::UserModel(QObject *parent)
     connect(this, &UserModel::currentUserNameChanged, [this] {
         auto user = getUser(d->currentUserName);
         if (!user) {
-            qCWarning(treelandGreeter) << "Couldn't find user:" << d->currentUserName;
+            qCInfo(treelandGreeter)
+                << "Current user is not managed by AccountsService, keep existing greeter locale:"
+                << d->currentUserName;
             return;
         }
 
