@@ -53,6 +53,7 @@ private:
     void updateNoCornerRadius();
     void updateImplicitSize();
     void onSourceRadiusChanged();
+    void releaseSourceSurface();
 
     SurfaceWrapper *m_sourceSurface = nullptr;
     SurfaceWrapper *m_proxySurface = nullptr;

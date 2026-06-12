@@ -98,9 +98,10 @@ void SurfaceProxy::setSurface(SurfaceWrapper *newSurface)
                                                }
                                            });
         }
-        m_sourceConnections << connect(m_sourceSurface, &SurfaceWrapper::destroyed, this, [this] {
+        m_sourceConnections << connect(m_sourceSurface, &SurfaceWrapper::aboutToBeInvalidated, this, [this] {
             Q_ASSERT(m_proxySurface);
             setSurface(nullptr);
+            //releaseSourceSurface();
         });
         m_sourceConnections << connect(m_sourceSurface,
                                        &SurfaceWrapper::noTitleBarChanged,
@@ -306,4 +307,15 @@ void SurfaceProxy::setFullProxy(bool newFullProxy)
     }
 
     Q_EMIT fullProxyChanged();
+}
+
+void SurfaceProxy::releaseSourceSurface()
+{
+    m_sourceSurface = nullptr;
+    m_proxySurface = nullptr;
+    m_sourceConnections.clear();
+    if (m_shadow) {
+        m_shadow->deleteLater();
+        m_shadow = nullptr;
+    }
 }

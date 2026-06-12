@@ -1042,6 +1042,13 @@ bool SurfaceWrapper::isWindowAnimationRunning() const
 
 void SurfaceWrapper::destroy()
 {
+    if (m_wrapperAboutToRemove) {
+        qCWarning(treelandSurface)
+            << "SurfaceWrapper::destroy() called multiple times on"
+            << this << "appId:" << m_appId
+            << "- this indicates a lifecycle management bug";
+        return;
+    }
     invalidate();
     if (!isWindowAnimationRunning())
         deleteLater();
