@@ -225,9 +225,17 @@ bool SurfaceContainer::doAddSurface(SurfaceWrapper *surface, bool setContainer)
         return false;
 
     if (setContainer) {
+        qCCritical(treelandSurface) << "doAddSurface:" << surface << "appId:" << surface->appId()
+                                    << "to:" << this << "class:" << metaObject()->className()
+                                    << "current parent:" << (surface->parent() ? QString("%1(%2)").arg(surface->parent()->metaObject()->className()).arg(QString::number(quintptr(surface->parent()), 16)) : "nullptr");
         Q_ASSERT(!surface->container());
         surface->setContainer(this);
-        surface->setParent(this);
+        if (surface->parent()) {
+            qCCritical(treelandSurface) << "WARNING: Surface already has parent, not setting new parent!"
+                                        << surface << "existing parent:" << surface->parent();
+        } else {
+            surface->setParent(this);
+        }
     }
 
     m_model->addSurface(surface);

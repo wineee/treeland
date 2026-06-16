@@ -205,6 +205,7 @@ public:
     bool freeze() const;
     bool withCursor() const;
     CaptureSource::CaptureSourceHint sourceHint() const;
+    WAYLIB_SERVER_NAMESPACE::WClient *waylandClient() const;
     QPointer<treeland_capture_session_v1> session() const;
     QPointer<CaptureSource> captureSource() const;
     QPointer<WOutputRenderWindow> outputRenderWindow() const;

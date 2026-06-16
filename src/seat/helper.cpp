@@ -1798,6 +1798,11 @@ RootSurfaceContainer *Helper::rootSurfaceContainer() const
     return m_rootSurfaceContainer;
 }
 
+CaptureSourceSelector *Helper::captureSelector() const
+{
+    return m_captureSelector;
+}
+
 void Helper::fakePressSurfaceBottomRightToReszie(SurfaceWrapper *surface)
 {
     auto position = surface->geometry().bottomRight();

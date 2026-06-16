@@ -197,6 +197,7 @@ public:
     void init(Treeland::Treeland *treeland);
 
     RootSurfaceContainer *rootSurfaceContainer() const;
+    CaptureSourceSelector *captureSelector() const;
     Output *getOutput(WOutput *output) const;
 
     float animationSpeed() const;

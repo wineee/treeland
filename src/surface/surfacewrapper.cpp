@@ -102,6 +102,8 @@ SurfaceWrapper::SurfaceWrapper(SurfaceWrapper *original, QQuickItem *parent)
     , m_maximizable(false)
     , m_appId(original->m_appId)
 {
+    qCCritical(treelandSurface) << "SurfaceWrapper::SurfaceWrapper(proxy) this:" << this
+                                << "appId:" << m_appId << "parent:" << parent;
     QQmlEngine::setContextForObject(this, m_engine->rootContext());
 
     if (original->m_shellSurface) {
@@ -483,6 +485,9 @@ void SurfaceWrapper::convertToNormalSurface(WToplevelSurface *shellSurface, Type
 
 void SurfaceWrapper::setParent(QQuickItem *item)
 {
+    qCCritical(treelandSurface) << "SurfaceWrapper::setParent:" << this << "appId:" << m_appId
+                                 << "from:" << (parent() ? QString("%1(%2)").arg(parent()->metaObject()->className()).arg(QString::number(quintptr(parent()), 16)) : "nullptr")
+                                 << "to:" << (item ? QString("%1(%2)").arg(item->metaObject()->className()).arg(QString::number(quintptr(item), 16)) : "nullptr");
     QObject::setParent(item);
     setParentItem(item);
 }
@@ -1042,13 +1047,11 @@ bool SurfaceWrapper::isWindowAnimationRunning() const
 
 void SurfaceWrapper::destroy()
 {
-    if (m_wrapperAboutToRemove) {
-        qCWarning(treelandSurface)
-            << "SurfaceWrapper::destroy() called multiple times on"
-            << this << "appId:" << m_appId
-            << "- this indicates a lifecycle management bug";
-        return;
-    }
+    // if (m_wrapperAboutToRemove) {
+    //     qCWarning(treelandSurface)
+    //         << "SurfaceWrapper::destroy() called multiple times";
+    //     return;
+    // }
     invalidate();
     if (!isWindowAnimationRunning())
         deleteLater();
@@ -1841,6 +1844,11 @@ void SurfaceWrapper::setContainer(SurfaceContainer *newContainer)
 {
     if (m_container == newContainer)
         return;
+    SurfaceContainer *oldContainer = m_container.data();
+    qCCritical(treelandSurface) << "SurfaceWrapper::setContainer:" << this
+                                 << "from:" << (oldContainer ? QString("%1(%2)").arg(oldContainer->metaObject()->className()).arg(QString::number(quintptr(oldContainer), 16)) : "nullptr")
+                                 << "to:" << (newContainer ? QString("%1(%2)").arg(newContainer->metaObject()->className()).arg(QString::number(quintptr(newContainer), 16)) : "nullptr")
+                                 << "parent:" << (parent() ? QString("%1(%2)").arg(parent()->metaObject()->className()).arg(QString::number(quintptr(parent()), 16)) : "nullptr");
     m_container = newContainer;
     Q_EMIT containerChanged();
 }

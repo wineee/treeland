@@ -7,8 +7,11 @@
 #include "modules/item-selector/itemselector.h"
 #include "seat/helper.h"
 #include "surface/surfacewrapper.h"
+#include "surface/surfaceproxy.h"
 #include "workspace/workspace.h"
 #include "common/treelandlogging.h"
+#include "core/rootsurfacecontainer.h"
+#include <wsocket.h>
 
 #include <private/qquickitem_p.h>
 
@@ -103,6 +106,11 @@ bool CaptureContextV1::withCursor() const
 CaptureSource::CaptureSourceHint CaptureContextV1::sourceHint() const
 {
     return { m_handle->sourceHint };
+}
+
+WAYLIB_SERVER_NAMESPACE::WClient *CaptureContextV1::waylandClient() const
+{
+    return WAYLIB_SERVER_NAMESPACE::WClient::get(wl_resource_get_client(m_handle->resource));
 }
 
 CaptureContextV1::CaptureContextV1(treeland_capture_context_v1 *h,
@@ -461,7 +469,13 @@ void CaptureManagerV1::freezeAllCapturedSurface(bool freeze, WSurface *mask)
                 content->setLive(!freeze);
             } else if (content->surface() == mask) {
                 auto surfaceItem = closestSurfaceItem(content);
-                m_maskSurfaceWrapper = qobject_cast<SurfaceWrapper *>(surfaceItem->parentItem());
+                auto parentItem = surfaceItem->parentItem();
+                // If parentItem is a proxy surface wrapper (m_proxySurface created by SurfaceProxy),
+                // we need to get the original surface wrapper from SurfaceProxy
+                if (auto proxy = qobject_cast<SurfaceProxy *>(parentItem->parentItem())) {
+                    parentItem = proxy->surface();
+                }
+                m_maskSurfaceWrapper = qobject_cast<SurfaceWrapper *>(parentItem);
                 if (m_maskSurfaceWrapper) {
                     m_maskSurfaceWrapper->setNoTitleBar(true);
                     m_maskSurfaceWrapper->setNoCornerRadius(true);
@@ -537,7 +551,8 @@ CaptureSourceSelector::CaptureSourceSelector(QQuickItem *parent)
     QQuickItemPrivate::get(m_canvasContainer)->anchors()->setFill(this);
     m_canvasContainer->setZ(2);
     updateCursorShape();
-    setAcceptedMouseButtons(Qt::LeftButton);
+    setAcceptedMouseButtons(Qt::AllButtons);
+    setAcceptHoverEvents(true);
     setActiveFocusOnTab(false);
     connect(m_itemSelector,
             &ItemSelector::hoveredItemChanged,
@@ -709,7 +724,8 @@ void CaptureSourceSelector::setCaptureManager(CaptureManagerV1 *newCaptureManage
 
 void CaptureSourceSelector::mouseMoveEvent(QMouseEvent *event)
 {
-    if (m_selectionMode == SelectionMode::SelectRegion) {
+    event->accept();
+    if (m_selectionMode == SelectionMode::SelectRegion && (event->buttons() & Qt::LeftButton)) {
         auto pos = event->position();
         auto distance = pos - m_selectionAnchor;
         if (distance.manhattanLength() > 2) {
@@ -792,6 +808,9 @@ void CaptureSourceSelector::setSelectedSource(CaptureSource *newSelectedSource, 
     m_selectedSource = newSelectedSource;
     if (m_selectedSource) {
         m_captureManager->contextInSelection()->setSource(m_selectedSource, region);
+        setZ(RootSurfaceContainer::OverlayZOrder);
+        setAcceptedMouseButtons(Qt::NoButton);
+        setAcceptHoverEvents(false);
     }
     Q_EMIT selectedSourceChanged();
 }
@@ -822,14 +841,23 @@ void CaptureSourceSelector::componentComplete()
 
 void CaptureSourceSelector::mousePressEvent(QMouseEvent *event)
 {
+    event->accept();
+    if (event->button() == Qt::RightButton) {
+        cancelSelection();
+        return;
+    }
     // Only handle pressed event in SelectRegion selection.
     if (selectionMode() == SelectionMode::SelectRegion && event->button() == Qt::LeftButton) {
         m_selectionAnchor = event->position();
     }
 }
 
-void CaptureSourceSelector::mouseReleaseEvent([[maybe_unused]] QMouseEvent *event)
+void CaptureSourceSelector::mouseReleaseEvent(QMouseEvent *event)
 {
+    event->accept();
+    if (event->button() != Qt::LeftButton) {
+        return;
+    }
     switch (selectionMode()) {
     case SelectionMode::SelectRegion: {
         auto viewport =

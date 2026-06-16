@@ -10,6 +10,7 @@
 #include "modules/app-id-resolver/appidresolver.h"
 #include "modules/dde-shell/ddeshellmanagerinterfacev1.h"
 #include "modules/foreign-toplevel/foreigntoplevelmanagerv1.h"
+#include "modules/capture/capture.h"
 #include "modules/prelaunch-splash/prelaunchsplash.h"
 #include "modules/wine-window-management/winewindowmanagement.h"
 #include "modules/wine-window-state/winewindowstate.h"
@@ -93,6 +94,16 @@ void ShellHandler::updateWrapperContainer(SurfaceWrapper *wrapper, WSurface *par
     if (wrapper->parentSurface())
         wrapper->parentSurface()->removeSubSurface(wrapper);
 
+    auto captureSelector = Helper::instance()->captureSelector();
+    bool isCaptureClient = false;
+    if (captureSelector && captureSelector->captureManager()) {
+        if (auto context = captureSelector->captureManager()->contextInSelection()) {
+            if (wrapper->shellSurface() && wrapper->shellSurface()->waylandClient() == context->waylandClient()) {
+                isCaptureClient = true;
+            }
+        }
+    }
+
     auto oldContainer = wrapper->container();
     if (parentSurface) {
         auto parentWrapper = m_rootSurfaceContainer->getSurface(parentSurface);
@@ -107,14 +118,21 @@ void ShellHandler::updateWrapperContainer(SurfaceWrapper *wrapper, WSurface *par
                 parentContainer->addSurface(wrapper);
         }
     } else {
+        auto targetContainer = isCaptureClient ? qobject_cast<SurfaceContainer *>(m_popupContainer) : qobject_cast<SurfaceContainer *>(m_workspace);
         if (oldContainer) {
-            if (qobject_cast<Workspace *>(oldContainer) == nullptr) {
+            if (oldContainer != targetContainer) {
                 oldContainer->removeSurface(wrapper);
-                m_workspace->addSurface(wrapper);
+                targetContainer->addSurface(wrapper);
+                if (isCaptureClient) {
+                    wrapper->setHasInitializeContainer(true);
+                }
             }
-            // else do nothing, already in workspace
+            // else do nothing, already in targetContainer
         } else {
-            m_workspace->addSurface(wrapper);
+            targetContainer->addSurface(wrapper);
+            if (isCaptureClient) {
+                wrapper->setHasInitializeContainer(true);
+            }
         }
     }
 }

@@ -3,6 +3,7 @@
 
 #include "surfaceproxy.h"
 
+#include "common/treelandlogging.h"
 #include "core/qmlengine.h"
 #include "surface/surfacewrapper.h"
 
@@ -15,7 +16,18 @@ SurfaceProxy::SurfaceProxy(QQuickItem *parent)
 
 SurfaceProxy::~SurfaceProxy()
 {
+    qCCritical(treelandSurface) << "SurfaceProxy::~SurfaceProxy:" << this << "parent:" << parent()
+                                 << "m_proxySurface:" << m_proxySurface;
+    // Disconnect all connections first to prevent setSurface(nullptr) from being
+    // called during destruction, which could cause double-destroy of m_proxySurface
+    for (const QMetaObject::Connection &connection : std::as_const(m_sourceConnections)) {
+        QObject::disconnect(connection);
+    }
+    m_sourceConnections.clear();
+
     if (m_proxySurface) {
+        qCCritical(treelandSurface) << "SurfaceProxy destroying m_proxySurface:" << m_proxySurface
+                                    << "m_proxySurface->parent:" << m_proxySurface->parent();
         m_proxySurface->destroy();
         m_proxySurface = nullptr;
     }
@@ -45,6 +57,9 @@ void SurfaceProxy::setSurface(SurfaceWrapper *newSurface)
     if (m_sourceSurface) {
         m_proxySurface = new SurfaceWrapper(m_sourceSurface,
                                             this);
+        qCCritical(treelandSurface) << "SurfaceProxy created m_proxySurface:" << m_proxySurface
+                                    << "m_proxySurface->parent:" << (m_proxySurface->parent() ? QString("%1(%2)").arg(m_proxySurface->parent()->metaObject()->className()).arg(QString::number((quintptr)m_proxySurface->parent(), 16)) : "nullptr")
+                                    << "SurfaceProxy:" << this << "SurfaceProxy->parent:" << (parent() ? QString("%1(%2)").arg(parent()->metaObject()->className()).arg(QString::number((quintptr)parent(), 16)) : "nullptr");
         m_proxySurface->setTransformOrigin(QQuickItem::TransformOrigin::TopLeft);
         m_proxySurface->setFlag(ItemIsFocusScope);
         m_proxySurface->QQuickItem::setFocus(false);
