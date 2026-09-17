@@ -1492,3 +1492,48 @@ void ShellHandler::handleDdeShellSurfaceV2Added(DDEShellSurfaceV2 *shellSurface,
                 wrapper->setAcceptKeyboardFocus(accept);
             });
 }
+
+void ShellHandler::handleDdeShellSurfaceV2Added(DDEShellSurfaceV2 *shellSurface,
+                                                SurfaceWrapper *wrapper)
+{
+    wrapper->setIsDDEShellSurface(true);
+
+    // The overlay role is the default of the v2 protocol; the normal role
+    // returns the surface to the regular window layer.
+    auto updateLayer = [shellSurface, wrapper] {
+        wrapper->setSurfaceRole(shellSurface->role() == DDEShellSurfaceV2::OVERLAY
+                                    ? SurfaceWrapper::SurfaceRole::Overlay
+                                    : SurfaceWrapper::SurfaceRole::Normal);
+    };
+    updateLayer();
+    connect(shellSurface, &DDEShellSurfaceV2::roleChanged, this, [updateLayer] {
+        updateLayer();
+    });
+
+    // Placement hints (set_position_hint / set_cursor_placement_hint) only
+    // affect the initial placement; apply them once here instead of tracking
+    // runtime changes with ongoing signal connections.
+    if (auto pos = shellSurface->positionHint())
+        wrapper->setClientRequstPos(*pos);
+    else if (auto offset = shellSurface->cursorPlacementHint())
+        wrapper->setAutoPlaceCursorOffset(*offset);
+
+    auto applySkipFlags = [wrapper](quint32 flags) {
+        wrapper->setSkipSwitcher(flags & DDEShellSurfaceV2::SkipSwitcher);
+        wrapper->setSkipDockPreView(flags & DDEShellSurfaceV2::SkipDockPreview);
+        wrapper->setSkipMutiTaskView(flags & DDEShellSurfaceV2::SkipMultitaskView);
+    };
+    applySkipFlags(shellSurface->skipFlags());
+    connect(shellSurface,
+            &DDEShellSurfaceV2::skipFlagsChanged,
+            this,
+            applySkipFlags);
+
+    wrapper->setAcceptKeyboardFocus(shellSurface->acceptKeyboardFocus());
+    connect(shellSurface,
+            &DDEShellSurfaceV2::acceptKeyboardFocusChanged,
+            this,
+            [wrapper](bool accept) {
+                wrapper->setAcceptKeyboardFocus(accept);
+            });
+}
