@@ -347,6 +347,16 @@ void GreeterProxy::onSessionNew(const QString &id, [[maybe_unused]] const QDBusO
 
 void GreeterProxy::onSessionRemoved(const QString &id, [[maybe_unused]] const QDBusObjectPath &path)
 {
+    bool ok = false;
+    const int sessionId = id.toInt(&ok);
+    if (!ok) {
+        // logind classic sessions use non-numeric ids like "c1"; they never
+        // map to a SessionManager session, so ignore them instead of letting
+        // toInt()'s 0 fallback collide with the dde sentinel session (id=0).
+        qCDebug(lcTlGreeter) << "Ignoring SessionRemoved with non-numeric session id:" << id;
+        return;
+    }
+
     // Disconnect from Lock/Unlock signals, if any
     auto conn = QDBusConnection::systemBus();
     conn.disconnect(Logind::serviceName(),
@@ -362,7 +372,7 @@ void GreeterProxy::onSessionRemoved(const QString &id, [[maybe_unused]] const QD
                     this,
                     SLOT(onSessionUnlock()));
 
-    auto session = Helper::instance()->sessionManager()->sessionForId(id.toInt());
+    auto session = Helper::instance()->sessionManager()->sessionForId(sessionId);
     if (session) {
         QString username = session->username();
         qCInfo(lcTlGreeter) << "Session removed: id=" << id << ", user=" << username;
