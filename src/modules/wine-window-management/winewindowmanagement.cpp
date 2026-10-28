@@ -5,15 +5,57 @@
 
 #include "common/treelandlogging.h"
 #include "core/rootsurfacecontainer.h"
-#include "qwayland-server-treeland-wine-window-management-unstable-v1.h"
 #include "core/waylandserver.h"
+#include "output/output.h"
+#include "qwayland-server-treeland-wine-window-management-unstable-v1.h"
 #include "surface/surfacewrapper.h"
 
 #include <wxdgtoplevelsurface.h>
 
 #include <QList>
+#include <QPointF>
+#include <QSizeF>
 
 WAYLIB_SERVER_USE_NAMESPACE
+
+namespace {
+
+// Fits the whole window into the work area (output geometry minus the exclusive
+// zones of layer-shell surfaces such as the dock) of the output it is heading
+// to. This mirrors what an X11 window manager does while placing a window: the
+// client asks for a position that may overlap a panel, the compositor decides
+// the final one. Windows larger than the work area are aligned to its origin
+// instead of being resized, as their size is owned by the client (xdg_toplevel
+// configure).
+QPointF clampToWorkArea(const QPointF &pos, const QSizeF &size, QRectF &workArea)
+{
+    auto *server = WaylandServer::instance();
+    auto *root = server ? server->rootSurfaceContainer() : nullptr;
+    Output *output = root ? root->outputAt(pos) : nullptr;
+    if (!output) {
+        return pos;
+    }
+
+    workArea = output->validGeometry();
+    if (!workArea.isValid()) {
+        return pos;
+    }
+
+    QPointF clamped = pos;
+    if (size.width() <= workArea.width()) {
+        clamped.setX(qBound(workArea.left(), clamped.x(), workArea.right() - size.width()));
+    } else {
+        clamped.setX(workArea.left());
+    }
+    if (size.height() <= workArea.height()) {
+        clamped.setY(qBound(workArea.top(), clamped.y(), workArea.bottom() - size.height()));
+    } else {
+        clamped.setY(workArea.top());
+    }
+    return clamped;
+}
+
+} // namespace
 
 class WineWindowControl;
 
@@ -116,14 +158,17 @@ public:
             }
             m_wrapper = nullptr;
         });
-        connect(m_wrapper, &QQuickItem::xChanged, this, [this] {
-            if (!m_suppressPositionEvents)
-                sendConfigurePosition();
-        });
-        connect(m_wrapper, &QQuickItem::yChanged, this, [this] {
-            if (!m_suppressPositionEvents)
-                sendConfigurePosition();
-        });
+        connect(m_wrapper->surface(),
+                &WSurface::mappedChanged,
+                this,
+                &WineWindowControl::handleMappedChanged);
+        if (auto *surfaceItem = m_wrapper->surfaceItem()) {
+            // The clamp needs the committed size, which is only available once
+            // the surface item became ready.
+            connect(surfaceItem, &WSurfaceItem::readyChanged, this, &WineWindowControl::clampOnMap);
+        }
+        connect(m_wrapper, &QQuickItem::xChanged, this, &WineWindowControl::handleItemMoved);
+        connect(m_wrapper, &QQuickItem::yChanged, this, &WineWindowControl::handleItemMoved);
         connect(m_wrapper, &SurfaceWrapper::alwaysOnTopChanged, this, [this] {
             sendConfigureStacking();
         });
@@ -168,16 +213,18 @@ protected:
             return;
         }
 
-        qCDebug(lcTlProtocol) << "set_position serial" << x << y << serial << "for window_id"
-                              << m_windowId;
+        const QPointF requested(x, y);
+        const QSizeF size(m_wrapper->width(), m_wrapper->height());
+        QRectF workArea;
+        const QPointF fitted = clampToWorkArea(requested, size, workArea);
+        const FitRequest fit = updateFitRequest(requested, fitted);
 
-        m_wrapper->setPositionAutomatic(false);
-        // Suppress only this class's xChanged/yChanged handlers to avoid
-        // emitting a serial=0 event alongside the client-requested one.
-        m_suppressPositionEvents = true;
-        m_wrapper->setPosition(QPointF(x, y));
-        m_suppressPositionEvents = false;
-        // Echo the client serial back in configure_position
+        qCDebug(lcTlProtocol) << "set_position" << requested << "window size" << size << "work area"
+                              << workArea << "fitted position" << fitted << fitRequestName(fit)
+                              << "for window_id" << m_windowId;
+
+        moveWrapperTo(fit == FitRequest::None ? requested : fitted);
+        // Echo the client serial back in configure_position, even when adjusted.
         sendConfigurePosition(serial);
     }
 
@@ -223,6 +270,140 @@ protected:
     }
 
 private:
+    // How a client position request is answered.
+    enum class FitRequest
+    {
+        None,     // honoured verbatim
+        First,    // fitted: first placement request after the surface was mapped
+        Repeated, // fitted again: the client repeated an already fitted request
+    };
+
+    static const char *fitRequestName(FitRequest fit)
+    {
+        switch (fit) {
+        case FitRequest::First:
+            return "fitted";
+        case FitRequest::Repeated:
+            return "fitted again, repeated request";
+        case FitRequest::None:
+            return "not fitted";
+        }
+        return "not fitted";
+    }
+
+    // Decides whether a client position request is fitted into the work area and
+    // remembers it for later repetitions.
+    //
+    // Only the first request after a map is fitted: Wine also parks windows
+    // outside the screen to emulate minimizing, so every other position is a
+    // decision of the client and is honoured as it is. The exception is a
+    // request that was fitted before and is now repeated, because Wine re-sends
+    // its original position after each configure and honouring it verbatim would
+    // undo the correction.
+    FitRequest updateFitRequest(const QPointF &requested, const QPointF &fitted)
+    {
+        // Fullscreen / maximized / tiled windows get their geometry from the
+        // compositor, so their position must not be overridden here.
+        const bool firstPlacement =
+            !m_firstPositionDone && m_wrapper->surfaceState() == SurfaceWrapper::State::Normal;
+        m_firstPositionDone = true;
+
+        if (firstPlacement) {
+            m_fittedRequest = requested;
+            m_hasFittedRequest = fitted != requested;
+            return FitRequest::First;
+        }
+
+        if (m_hasFittedRequest && requested == m_fittedRequest)
+            return FitRequest::Repeated;
+        return FitRequest::None;
+    }
+
+    void handleMappedChanged()
+    {
+        if (!m_wrapper)
+            return;
+        // A surface may be unmapped and mapped again (Wine hides windows that
+        // way): fit the position again on every map and treat the first
+        // set_position after a map as the first placement request.
+        if (!m_wrapper->surface()->mapped()) {
+            m_firstPositionDone = false;
+            m_mapClampPending = false;
+            m_hasFittedRequest = false;
+            return;
+        }
+
+        m_mapClampPending = true;
+        clampOnMap();
+    }
+
+    void handleItemMoved()
+    {
+        if (!m_suppressPositionEvents)
+            sendConfigurePosition();
+    }
+
+    bool surfaceItemReady() const
+    {
+        auto *surfaceItem = m_wrapper->surfaceItem();
+        return surfaceItem && surfaceItem->isReady();
+    }
+
+    void moveWrapperTo(const QPointF &pos)
+    {
+        m_wrapper->setPositionAutomatic(false);
+        // Suppress only this class's xChanged/yChanged handlers to avoid
+        // emitting a serial=0 event alongside the one sent by the caller.
+        m_suppressPositionEvents = true;
+        m_wrapper->setPosition(pos);
+        m_suppressPositionEvents = false;
+    }
+
+    // Fits the current position into the work area once the surface is mapped
+    // and its item reports the committed size.
+    void clampOnMap()
+    {
+        if (!m_mapClampPending || !m_wrapper)
+            return;
+        if (m_wrapper->surfaceState() != SurfaceWrapper::State::Normal) {
+            m_mapClampPending = false;
+            return;
+        }
+
+        if (!surfaceItemReady()) {
+            // readyChanged fires once the committed size is known, the clamp is
+            // retried from there.
+            qCDebug(lcTlProtocol) << "clamp on map deferred until the surface item is ready,"
+                                  << "window_id" << m_windowId;
+            return;
+        }
+
+        const QSizeF size(m_wrapper->width(), m_wrapper->height());
+        if (size.width() <= 0 || size.height() <= 0) {
+            qCDebug(lcTlProtocol) << "clamp on map skipped, window size" << size << "is not valid,"
+                                  << "window_id" << m_windowId;
+            return;
+        }
+        m_mapClampPending = false;
+
+        const QPointF current(m_wrapper->x(), m_wrapper->y());
+        QRectF workArea;
+        const QPointF fitted = clampToWorkArea(current, size, workArea);
+        qCDebug(lcTlProtocol) << "clamp on map" << current << "window size" << size << "work area"
+                              << workArea << "fitted position" << fitted << "for window_id"
+                              << m_windowId;
+        if (fitted == current)
+            return;
+
+        moveWrapperTo(fitted);
+        // Keep the fitted position authoritative for the original coordinate:
+        // Wine repeats its request once it sees the new configure.
+        m_fittedRequest = current;
+        m_hasFittedRequest = true;
+        // Compositor-initiated correction, not the answer to a set_position.
+        sendConfigurePosition();
+    }
+
     // serial=0 means compositor-initiated (not in response to a client set_position)
     void sendConfigurePosition(uint32_t serial = 0)
     {
@@ -321,7 +502,11 @@ private:
     WineWindowManagerPrivate *m_manager = nullptr;
     uint32_t m_windowId = 0;
     SurfaceWrapper *m_wrapper = nullptr;
+    bool m_firstPositionDone = false;
+    bool m_mapClampPending = false;
     bool m_suppressPositionEvents = false;
+    QPointF m_fittedRequest;
+    bool m_hasFittedRequest = false;
 };
 
 void WineWindowManagerPrivate::get_window_control(Resource *resource,
