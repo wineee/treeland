@@ -1505,6 +1505,11 @@ void SurfaceWrapper::updateTitleBar()
     if (!m_surfaceItem)
         return;
 
+    // A frame-less wrapper draws no compositor chrome at all, so it must never
+    // get a compositor titlebar, whatever setNoTitleBar() was called with.
+    if (m_noDecoration && !m_titleBar)
+        return;
+
     if (noTitleBar() == !m_titleBar)
         return;
 
