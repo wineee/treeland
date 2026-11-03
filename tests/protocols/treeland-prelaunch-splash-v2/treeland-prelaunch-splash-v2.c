@@ -7,6 +7,7 @@
 #include "server-bridge-api.h"
 #include "treeland-prelaunch-splash-unstable-v2-client-protocol.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -88,6 +89,21 @@ static int connect_client(struct test_ctx *ctx, const char *socket_name)
 static int bind_manager(struct test_ctx *ctx)
 {
     return ctx->manager != NULL;
+}
+
+/* A second client on a *different* root socket (session) must be able to bind
+ * even while the first session still owns the manager. */
+static int bind_manager_other_session(struct test_ctx *ctx)
+{
+    const char *extra = splash_extra_socket_name();
+    if (!extra)
+        return 0;
+    if (!client_connect(&ctx->connection3, extra))
+        return 0;
+    ctx->display3 = ctx->connection3.display;
+    ctx->manager3 = client_bind(&ctx->connection3, "treeland_prelaunch_splash_manager_v2",
+                                &treeland_prelaunch_splash_manager_v2_interface, 1);
+    return ctx->manager3 != NULL && wl_display_roundtrip(ctx->display3) >= 0;
 }
 
 static int create_splash_null_icon(struct test_ctx *ctx)
@@ -194,37 +210,45 @@ static int destroy_manager(struct test_ctx *ctx)
     return 1;
 }
 
-static char g_client_error[TEST_MSG_MAX];
-
-static void capture_client_error(const char *format, va_list args)
+/* Connect a fresh same-session client and expect the singleton binding to be
+ * rejected with binding_rejected. Uses a local connection because the rejected
+ * client is torn down as part of the rejection and is not reused later. */
+static int expect_binding_rejected(struct test_ctx *ctx)
 {
-    vsnprintf(g_client_error, sizeof(g_client_error), format, args);
-}
-
-/* The manager is a per-user singleton: a second client must be rejected with
- * binding_rejected instead of taking over the binding. */
-static int reject_second_client(struct test_ctx *ctx)
-{
-    int ok = 0;
-    if (!client_connect(&ctx->connection2, ctx->socket_name))
+    struct client_connection rejected = { 0 };
+    if (!client_connect(&rejected, ctx->socket_name))
         return 0;
-    ctx->display2 = ctx->connection2.display;
+    struct treeland_prelaunch_splash_manager_v2 *manager = client_bind(
+        &rejected, "treeland_prelaunch_splash_manager_v2",
+        &treeland_prelaunch_splash_manager_v2_interface, 1);
+    if (!manager)
+        return 0;
 
-    g_client_error[0] = '\0';
-    wl_log_set_handler_client(capture_client_error);
-    ctx->manager2 = client_bind(&ctx->connection2, "treeland_prelaunch_splash_manager_v2",
-                                &treeland_prelaunch_splash_manager_v2_interface, 1);
-    const int ret = wl_display_roundtrip(ctx->display2);
-    wl_log_set_handler_client(NULL);
+    if (wl_display_roundtrip(rejected.display) >= 0)
+        return 0;
+    if (wl_display_get_error(rejected.display) != EPROTO)
+        return 0;
 
-    ok = ret < 0 && strstr(g_client_error, "already bound") != NULL;
+    const struct wl_interface *error_interface = NULL;
+    uint32_t error_id = 0;
+    const uint32_t code = wl_display_get_protocol_error(rejected.display, &error_interface,
+                                                        &error_id);
+    if (code != TREELAND_PRELAUNCH_SPLASH_MANAGER_V2_ERROR_BINDING_REJECTED)
+        return 0;
+    if (error_interface != &treeland_prelaunch_splash_manager_v2_interface)
+        return 0;
 
     /* The rejected connection is already dead; drop it without sending requests. */
-    wl_display_disconnect(ctx->display2);
-    memset(&ctx->connection2, 0, sizeof(ctx->connection2));
-    ctx->display2 = NULL;
-    ctx->manager2 = NULL;
-    return ok;
+    wl_display_disconnect(rejected.display);
+    return 1;
+}
+
+/* The manager is a per-session singleton: a second client on the same root
+ * socket must be rejected with binding_rejected instead of taking over the
+ * binding. */
+static int reject_second_client(struct test_ctx *ctx)
+{
+    return expect_binding_rejected(ctx);
 }
 
 static int create_splash_after_reject(struct test_ctx *ctx)
@@ -252,8 +276,67 @@ static int bind_after_manager_destroy(struct test_ctx *ctx)
     return ctx->manager2 != NULL && wl_display_roundtrip(ctx->display2) >= 0;
 }
 
+/* After the rejected client's deferred teardown completes, the incumbent
+ * binding must still be intact: another same-session client is still rejected. */
+static int reject_after_rejected_cleanup(struct test_ctx *ctx)
+{
+    return expect_binding_rejected(ctx);
+}
+
+/* A client may hold several manager objects on the same connection; the
+ * singleton binding must be released only when the *last* one is destroyed. */
+static int bind_second_manager_object(struct test_ctx *ctx)
+{
+    ctx->manager_a = client_bind(&ctx->connection, "treeland_prelaunch_splash_manager_v2",
+                                 &treeland_prelaunch_splash_manager_v2_interface, 1);
+    return ctx->manager_a != NULL;
+}
+
+static int reject_with_two_manager_objects(struct test_ctx *ctx)
+{
+    return expect_binding_rejected(ctx);
+}
+
+static int destroy_one_manager_object(struct test_ctx *ctx)
+{
+    if (!ctx->manager_a)
+        return 0;
+    treeland_prelaunch_splash_manager_v2_destroy(ctx->manager_a);
+    ctx->manager_a = NULL;
+    return 1;
+}
+
+static int reject_after_one_manager_destroyed(struct test_ctx *ctx)
+{
+    return expect_binding_rejected(ctx);
+}
+
+/* Disconnecting the owner without destroying its manager object also releases
+ * the singleton binding. */
+static int disconnect_owner_without_destroy(struct test_ctx *ctx)
+{
+    if (!ctx->display2)
+        return 0;
+    wl_display_disconnect(ctx->display2);
+    memset(&ctx->connection2, 0, sizeof(ctx->connection2));
+    ctx->display2 = NULL;
+    ctx->manager2 = NULL;
+    return 1;
+}
+
+static int bind_after_disconnect(struct test_ctx *ctx)
+{
+    if (!client_connect(&ctx->connection4, ctx->socket_name))
+        return 0;
+    ctx->display4 = ctx->connection4.display;
+    ctx->manager4 = client_bind(&ctx->connection4, "treeland_prelaunch_splash_manager_v2",
+                                &treeland_prelaunch_splash_manager_v2_interface, 1);
+    return ctx->manager4 != NULL && wl_display_roundtrip(ctx->display4) >= 0;
+}
+
 static const struct test_case cases[] = {
     { "manager.bind", bind_manager },
+    { "manager.bind_other_session", bind_manager_other_session },
     { "manager.create_splash_null_icon", create_splash_null_icon },
     { "server.splash_requested_null_icon", query_server },
     { "server.assert_splash_requested_null_icon", splash_requested_null_icon },
@@ -270,8 +353,15 @@ static const struct test_case cases[] = {
     { "manager.create_splash_after_reject", create_splash_after_reject },
     { "server.splash_requested_after_reject", query_server },
     { "server.assert_splash_requested_after_reject", splash_requested_after_reject },
+    { "manager.reject_after_rejected_cleanup", reject_after_rejected_cleanup },
+    { "manager.bind_second_manager_object", bind_second_manager_object },
+    { "manager.reject_with_two_manager_objects", reject_with_two_manager_objects },
+    { "manager.destroy_one_manager_object", destroy_one_manager_object },
+    { "manager.reject_after_one_manager_destroyed", reject_after_one_manager_destroyed },
     { "manager.destroy", destroy_manager },
     { "manager.bind_after_release", bind_after_manager_destroy },
+    { "manager.disconnect_owner_without_destroy", disconnect_owner_without_destroy },
+    { "manager.bind_after_disconnect", bind_after_disconnect },
 };
 
 void test_cleanup(struct test_ctx *ctx)
@@ -281,8 +371,13 @@ void test_cleanup(struct test_ctx *ctx)
     if (ctx->splash2) treeland_prelaunch_splash_v2_destroy(ctx->splash2);
     if (ctx->splash1) treeland_prelaunch_splash_v2_destroy(ctx->splash1);
     if (ctx->icon_buffer) wl_buffer_destroy(ctx->icon_buffer);
+    if (ctx->manager3) treeland_prelaunch_splash_manager_v2_destroy(ctx->manager3);
+    if (ctx->manager4) treeland_prelaunch_splash_manager_v2_destroy(ctx->manager4);
     if (ctx->manager2) treeland_prelaunch_splash_manager_v2_destroy(ctx->manager2);
+    if (ctx->manager_a) treeland_prelaunch_splash_manager_v2_destroy(ctx->manager_a);
     if (ctx->manager) treeland_prelaunch_splash_manager_v2_destroy(ctx->manager);
+    if (ctx->connection3.display) client_disconnect(&ctx->connection3);
+    if (ctx->connection4.display) client_disconnect(&ctx->connection4);
     if (ctx->connection2.display) client_disconnect(&ctx->connection2);
     client_disconnect(&ctx->connection);
 }

@@ -9,6 +9,7 @@ extern "C" {
 
 int protocol_test_run(const char *socket_name);
 void splash_query_state(void *data);
+const char *splash_extra_socket_name(void);
 
 #include "client-connection.h"
 
@@ -39,6 +40,7 @@ struct test_ctx {
     struct wl_display *display;
 
     struct treeland_prelaunch_splash_manager_v2 *manager;
+    struct treeland_prelaunch_splash_manager_v2 *manager_a; /* second manager object on the incumbent client */
     struct wl_shm *shm;
 
     struct treeland_prelaunch_splash_v2 *splash1;
@@ -51,6 +53,17 @@ struct test_ctx {
     struct client_connection connection2;
     struct wl_display *display2;
     struct treeland_prelaunch_splash_manager_v2 *manager2;
+
+    /* Second session (separate root socket), used to check per-session scope. */
+    struct client_connection connection3;
+    struct wl_display *display3;
+    struct treeland_prelaunch_splash_manager_v2 *manager3;
+
+    /* Third same-session client: re-verifies exclusivity after rejected-client
+     * cleanup and after the incumbent disconnects with a live manager. */
+    struct client_connection connection4;
+    struct wl_display *display4;
+    struct treeland_prelaunch_splash_manager_v2 *manager4;
 
     struct splash_server_state server;
 
