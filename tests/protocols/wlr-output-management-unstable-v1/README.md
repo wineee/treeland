@@ -15,7 +15,7 @@
 | --- | --- | --- | --- |
 | 初始 output 描述 | bind manager v4 并 roundtrip | 一个 head、`name`、`description`、virtual mode 的 `size`、`current_mode`、`enabled`、`position`、`transform`、`scale`、`adaptive_sync` 与携带 serial 的 `done`；仅在固定刷新率时要求 `refresh` | P |
 | enabled configuration test | 用最新 serial 创建 configuration，为唯一 head 调用 `enable_head`、custom mode、position、transform、scale、adaptive-sync 后 `test` | 唯一 `succeeded`，无 `failed/cancelled`；不改变 output 状态 | P |
-| disabled configuration test | 新 configuration 对唯一 head 调用 `disable_head` 后 `test` | 唯一 `succeeded`，不关闭 fixture output | P |
+| disabled configuration test | 新 configuration 对唯一 head 调用 `disable_head` 后 `test` | 唯一 `failed`（服务端拒绝会关闭所有输出的配置），不关闭 fixture output | P |
 | apply 的业务结果 | enabled configuration 设置 custom `1920×1080`、position `(37,53)`、`transform=90°`、`scale=2` 后 `apply` | `succeeded`，fixture 从真实 production output 读取到 enabled、坐标 `(37,53)`、90° 与 scale 2 | E |
 | 恢复配置 | 用新 serial apply `(0,0)`、normal transform、scale 1 | `succeeded`，真实 output 回到 `(0,0)`、normal、scale 1 | E |
 | manager/head/mode 生命周期 | `stop`、收到 `finished`，release head 与 virtual mode | `finished` 恰好一次，client 可释放子资源 | P |
@@ -56,6 +56,6 @@ CI 执行记录结果，当前未因本次实现而声称已通过。
   与 `set_mode` 的 I/E 路径。
 - 尚未构造 stale serial 的 `cancelled`，以及 duplicate/unconfigured/used configuration 的 error；这些
   应由独立连接断言 protocol error，避免破坏主 E 链路。
-- 尚未验证多 output 的相对布局、真正 disable/apply、adaptive-sync 的硬件结果，或 output hotplug
+- 尚未验证多 output 的相对布局、真正 disable/apply（在至少保留一块输出的前提下）、adaptive-sync 的硬件结果，或 output hotplug
   导致的 head/mode `finished`。这些场景需要多 head 或支持 VRR 的 runner；scale/transform 已覆盖
   production state，不等同于最终像素 readback。

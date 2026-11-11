@@ -326,8 +326,10 @@ int protocol_test_run(const char *socket_name)
     zwlr_output_configuration_v1_disable_head(configuration, events.head);
     stage = 5;
     zwlr_output_configuration_v1_test(configuration);
-    if (wl_display_roundtrip(connection.display) < 0 || events.configuration_succeeded_count != 2
-        || events.configuration_failed_count || events.configuration_cancelled_count) {
+    /* Disabling the only output would leave the compositor screen-less, so the
+       server must reject the whole configuration instead of reporting success. */
+    if (wl_display_roundtrip(connection.display) < 0 || events.configuration_succeeded_count != 1
+        || events.configuration_failed_count != 1 || events.configuration_cancelled_count) {
         zwlr_output_configuration_v1_destroy(configuration);
         goto done;
     }
@@ -344,8 +346,8 @@ int protocol_test_run(const char *socket_name)
     zwlr_output_configuration_v1_apply(configuration);
     if (wl_display_roundtrip(connection.display) < 0
         || !invoke_on_server_thread(output_management_render, NULL)
-        || wl_display_roundtrip(connection.display) < 0 || events.configuration_succeeded_count != 3
-        || events.configuration_failed_count || events.configuration_cancelled_count) {
+        || wl_display_roundtrip(connection.display) < 0 || events.configuration_succeeded_count != 2
+        || events.configuration_failed_count != 1 || events.configuration_cancelled_count) {
         zwlr_output_configuration_v1_destroy(configuration);
         goto done;
     }
@@ -367,8 +369,8 @@ int protocol_test_run(const char *socket_name)
     zwlr_output_configuration_v1_apply(configuration);
     if (wl_display_roundtrip(connection.display) < 0
         || !invoke_on_server_thread(output_management_render, NULL)
-        || wl_display_roundtrip(connection.display) < 0 || events.configuration_succeeded_count != 4
-        || events.configuration_failed_count || events.configuration_cancelled_count) {
+        || wl_display_roundtrip(connection.display) < 0 || events.configuration_succeeded_count != 3
+        || events.configuration_failed_count != 1 || events.configuration_cancelled_count) {
         zwlr_output_configuration_v1_destroy(configuration);
         goto done;
     }
